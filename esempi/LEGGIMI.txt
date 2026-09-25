@@ -1,0 +1,14 @@
+MODELLI 3D DI ESEMPIO
+
+eroe.glb
+  "Robot Expressive" di Tomas Laulhe (Quaternius), modifiche di Don McCurdy.
+  Licenza CC0 1.0 (pubblico dominio). Scheletro con 43 ossa e 14 animazioni
+  (Idle, Walking, Running, Dance, Wave, ...).
+  Fonte: repository ufficiale di three.js (examples/models/gltf/RobotExpressive).
+
+eroe-armatura-oro.glb
+  Lo stesso modello con materiali oro e rosso: serve a provare le "versioni"
+  del personaggio legate all'armatura equipaggiata. Licenza CC0.
+
+spada.glb, scudo.glb, elmo.glb, amuleto.glb, faretra.glb, borsa.glb
+  Oggetti semplici creati per questa app. Licenza CC0: usali come vuoi.
