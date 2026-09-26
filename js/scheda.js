@@ -102,6 +102,8 @@ export function apriModificaBase() {
       h('div.griglia2',
         campo('Velocità (m)', inputNum(p.velocita, (v) => agg((x) => (x.velocita = v)), { step: 1.5 })),
         campo('Bonus iniziativa extra', inputNum(p.iniziativaBonus, (v) => agg((x) => (x.iniziativaBonus = v))))),
+      campo('Bonus a tutti i tiri salvezza', inputNum(p.bonusTiriSalvezza || 0, (v) => agg((x) => (x.bonusTiriSalvezza = v)))),
+      h('p.nota', 'Il bonus ai tiri salvezza serve per effetti sempre attivi, come l\'Aura di protezione del paladino (+ mod. Carisma, min. +1).'),
       h('p.nota', 'Tutto viene salvato automaticamente sul telefono.'));
   });
 }
@@ -192,7 +194,7 @@ function riposoBreve() {
     const info = h('p');
     const agg = () => (info.textContent = `PF ${p.pf.att}/${p.pf.max} · Dadi vita rimasti: ${p.dadiVita.rimasti} (d${p.dadiVita.tipo} ${R.segno(m)})`);
     agg();
-    c.append(h('p.nota', 'Durante un riposo breve (almeno 1 ora) puoi spendere dadi vita per recuperare PF. Si ricaricano anche le risorse "a riposo breve" e gli slot del patto del Warlock.'),
+    c.append(h('p.nota', 'Durante un riposo breve (almeno 1 ora) puoi spendere dadi vita per recuperare PF. Si ricaricano anche le risorse "a riposo breve" (quelle "1 al breve" recuperano un solo uso) e gli slot del patto del Warlock.'),
       info,
       h('button.btn.grande', { onclick: () => {
         if (p.dadiVita.rimasti <= 0) return avviso('Non hai più dadi vita.', 'errore');
@@ -203,7 +205,7 @@ function riposoBreve() {
       } }, `🎲 Spendi un dado vita`),
       h('button.btn.grande.primario', { onclick: () => {
         modifica((x) => {
-          x.risorse.forEach((r) => { if (r.ricarica === 'breve') r.usati = 0; });
+          x.risorse.forEach((r) => { if (r.ricarica === 'breve') r.usati = 0; else if (r.ricarica === 'breve1') r.usati = Math.max(0, r.usati - 1); });
           x.magia.pattoUsati = 0;
         });
         chiudi(); avviso('Riposo breve completato ☾');
@@ -331,19 +333,23 @@ function renderRisorse() {
   return card('Risorse di classe',
     h('p.nota', 'Ira, Ki, Canalizzare divinità, Punti stregoneria… Si ricaricano da sole con i riposi.'),
     p.risorse.map((r) => h('div.risorsa',
-      h('div.ris-info', { onclick: () => modificaRisorsa(r) }, h('strong', r.nome), h('small', `${r.max - r.usati}/${r.max} · riposo ${r.ricarica}`)),
+      h('div.ris-info', { onclick: () => modificaRisorsa(r) }, h('strong', r.nome), h('small', `${r.max - r.usati}/${r.max} · ${RICARICHE_TESTO[r.ricarica] || 'riposo ' + r.ricarica}`)),
       h('div.pallini', Array.from({ length: Math.min(r.max, 20) }, (_, i) => h('button.pallino.oro' + (i < r.max - r.usati ? '.pieno' : ''), {
         onclick: () => { vibra(8); modifica((x) => { const y = x.risorse.find((z) => z.id === r.id); const disp = y.max - y.usati; y.usati = i < disp ? y.max - i : y.max - i - 1; }); },
       }))))),
     h('button.btn.aggiungi', { onclick: () => modificaRisorsa() }, '+ Aggiungi risorsa'));
 }
 
+// breve1 = ne recuperi 1 con il riposo breve e tutte con il lungo (es. Incanalare divinità, regole 2024)
+const RICARICHE = [['breve', 'Riposo breve (tutte)'], ['breve1', '1 al riposo breve, tutte al lungo'], ['lungo', 'Riposo lungo']];
+const RICARICHE_TESTO = { breve: 'riposo breve', breve1: '1 al breve, tutte al lungo', lungo: 'riposo lungo' };
+
 function modificaRisorsa(r) {
   const ris = r ? { ...r } : { id: nuovoId(), nome: '', max: 2, usati: 0, ricarica: 'lungo' };
   pannello(r ? 'Modifica risorsa' : 'Nuova risorsa', (c, chiudi) => {
     c.append(campo('Nome', inputTesto(ris.nome, (v) => (ris.nome = v), { placeholder: 'Es. Ira' })),
       h('div.griglia2', campo('Utilizzi massimi', inputNum(ris.max, (v) => (ris.max = Math.max(1, v)))),
-        campo('Si ricarica con', selezione([['breve', 'Riposo breve'], ['lungo', 'Riposo lungo']], ris.ricarica, (v) => (ris.ricarica = v)))),
+        campo('Si ricarica con', selezione(RICARICHE, ris.ricarica, (v) => (ris.ricarica = v)))),
       h('div.riga-btn',
         r ? h('button.btn.pericolo', { onclick: () => { modifica((x) => (x.risorse = x.risorse.filter((y) => y.id !== ris.id))); chiudi(); } }, 'Elimina') : null,
         h('button.btn.primario', { onclick: () => {
@@ -371,6 +377,7 @@ export function renderCaratteristiche(c) {
     })),
     h('button.btn.piccolo.centrato', { onclick: () => { modificaPunteggi = !modificaPunteggi; modifica(() => {}); } }, modificaPunteggi ? '✔ Fine modifica' : '✎ Modifica punteggi'),
     card('Tiri salvezza',
+      Number(p.bonusTiriSalvezza) ? h('p.nota', `Include ${R.segno(Number(p.bonusTiriSalvezza))} a tutti i tiri salvezza (si cambia da Eroe → Modifica).`) : null,
       R.CARATTERISTICHE.map((cr) => {
         const b = R.bonusTS(p, cr.id), ha = p.tsComp.includes(cr.id);
         return h('div.riga-abilita',

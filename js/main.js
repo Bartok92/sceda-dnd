@@ -8,7 +8,7 @@ import { avviaCreazione } from './wizard.js';
 import { apriTiraDadi } from './dadi.js';
 import { esportaBackup, importaBackup } from './backup.js';
 
-export const VERSIONE_APP = '1.0.0';
+export const VERSIONE_APP = '1.0.1';
 
 const TABS = [
   { id: 'eroe', nome: 'Eroe', icona: '♜' },

@@ -34,7 +34,7 @@ export function personaggioVuoto() {
     nome: 'Nuovo eroe', razza: 'Umano', classe: 'Guerriero', sottoclasse: '', livello: 1, pe: 0,
     allineamento: 'Neutrale Puro', background: '', ispirazione: false,
     car: { FOR: 10, DES: 10, COS: 10, INT: 10, SAG: 10, CAR: 10 },
-    tsComp: [], abilita: {}, bonusAbilita: {},
+    tsComp: [], bonusTiriSalvezza: 0, abilita: {}, bonusAbilita: {},
     pf: { att: 10, max: 10, temp: 0 }, dadiVita: { tipo: 10, rimasti: 1 }, tsMorte: { succ: 0, fall: 0 },
     ca: { modo: 'auto', manuale: 10, bonus: 0 }, velocita: 9, iniziativaBonus: 0,
     attacchi: [],

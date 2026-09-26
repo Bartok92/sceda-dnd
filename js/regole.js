@@ -139,7 +139,8 @@ export function bonusAbilita(pg, ab) {
   return mod(pg.car[ab.car]) + liv * competenza(pg.livello) + (pg.bonusAbilita?.[ab.id] || 0);
 }
 export function bonusTS(pg, car) {
-  return mod(pg.car[car]) + (pg.tsComp?.includes(car) ? competenza(pg.livello) : 0);
+  // bonusTiriSalvezza: bonus a tutti i TS (es. Aura di protezione del paladino)
+  return mod(pg.car[car]) + (pg.tsComp?.includes(car) ? competenza(pg.livello) : 0) + (Number(pg.bonusTiriSalvezza) || 0);
 }
 export function percezionePassiva(pg) {
   return 10 + bonusAbilita(pg, ABILITA.find((a) => a.id === 'percezione'));
