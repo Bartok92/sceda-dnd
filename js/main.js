@@ -3,12 +3,13 @@ import { h, $, avviso, pannello, conferma, scegliFile, selezione, campo, fmtMB }
 import { db, chiediPersistenza, stimaSpazio, nuovoId } from './db.js';
 import { stato, suCambio, salvaOra, normalizza } from './stato.js';
 import * as S from './scheda.js';
+import { testoClassi } from './regole.js';
 import { renderZaino } from './zaino.js';
 import { avviaCreazione } from './wizard.js';
 import { apriTiraDadi } from './dadi.js';
 import { esportaBackup, importaBackup } from './backup.js';
 
-export const VERSIONE_APP = '1.0.1';
+export const VERSIONE_APP = '1.1.0';
 
 const TABS = [
   { id: 'eroe', nome: 'Eroe', icona: '♜' },
@@ -52,7 +53,7 @@ async function mostraElenco() {
       h('p.nota', 'Nota: l\'app installata ha un archivio separato da Safari. Crea i personaggi dopo averla installata (o usa il backup per trasferirli).')) : null,
     elenco.length ? h('div.lista-pg', elenco.map((p) => h('div.pg-card', { onclick: (e) => !e.target.closest('button') && apriPersonaggio(p.id) },
       h('div.pg-card-icona', (p.classe || '?')[0]),
-      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${p.classe} · Liv. ${p.livello}`),
+      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })} · Liv. ${p.livello}`),
         h('div.barra.mini', h('div.barra-riemp', { style: { width: Math.max(0, Math.min(100, (p.pf.att / p.pf.max) * 100)) + '%' } }))),
       h('button.btn-icona', { 'aria-label': 'Opzioni', onclick: () => menuPersonaggio(p) }, '⋮')))) :
       h('div.card.vuota', h('p', 'Nessun personaggio ancora.'), h('p.nota', 'Crea il tuo primo eroe con la procedura guidata.')),
@@ -62,7 +63,7 @@ async function mostraElenco() {
       h('button.btn', { onclick: ripristina }, '📥 Ripristina backup')),
     elenco.length && (!ultimoBackup || Date.now() - ultimoBackup > 14 * 864e5) ? h('p.nota.centrato', ultimoBackup ? `Ultimo backup: ${new Date(ultimoBackup).toLocaleDateString('it-IT')}. Fanne uno nuovo ogni tanto!` : 'Consiglio: fai un backup ogni tanto, per non perdere nulla.') : null,
     h('button.btn-link.centrato', { onclick: apriImpostazioni }, '⚙ Impostazioni e informazioni'),
-    h('p.piede', `Versione ${VERSIONE_APP} · Dungeons & Dragons è un marchio di Wizards of the Coast. Contenuti di regole dal SRD 5.1 (CC-BY-4.0).`)));
+    h('p.piede', `Versione ${VERSIONE_APP} · Dungeons & Dragons è un marchio di Wizards of the Coast. Regole dal SRD 5.1 e 5.2 (CC-BY-4.0).`)));
 }
 
 function menuPersonaggio(p) {
@@ -234,7 +235,7 @@ document.addEventListener('vai-tab', (e) => strutturaScheda && vaiTab(e.detail))
 function renderTutte() {
   if (!stato.pg || !strutturaScheda) return;
   const p = stato.pg;
-  strutturaScheda.titolo.replaceChildren(h('strong', p.nome), h('small', `${p.classe} · Liv. ${p.livello}`));
+  strutturaScheda.titolo.replaceChildren(h('strong', p.nome), h('small', `${testoClassi(p, { sottoclassi: false })} · Liv. ${p.livello}`));
   for (const t of TABS) {
     const pane = strutturaScheda.panes[t.id];
     const top = pane.scrollTop;

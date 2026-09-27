@@ -1,5 +1,7 @@
 // Stato dell'app: personaggio corrente, salvataggio automatico, notifiche di cambiamento.
 import { db, nuovoId } from './db.js';
+import * as R from './regole.js';
+import { TALENTI_ORIGINE } from './dati2024.js';
 
 export const stato = { pg: null, tab: 'eroe' };
 const ascoltatori = new Set();
@@ -31,7 +33,7 @@ export function modifica(fn, cosa = 'scheda') {
 export function personaggioVuoto() {
   return {
     id: nuovoId(), creato: Date.now(), modificato: Date.now(),
-    nome: 'Nuovo eroe', razza: 'Umano', classe: 'Guerriero', sottoclasse: '', livello: 1, pe: 0,
+    nome: 'Nuovo eroe', razza: 'Umano', classe: 'Guerriero', sottoclasse: '', multiclasse: [], livello: 1, pe: 0,
     allineamento: 'Neutrale Puro', background: '', ispirazione: false,
     car: { FOR: 10, DES: 10, COS: 10, INT: 10, SAG: 10, CAR: 10 },
     tsComp: [], bonusTiriSalvezza: 0, abilita: {}, bonusAbilita: {},
@@ -43,9 +45,31 @@ export function personaggioVuoto() {
     inventario: [], monete: { mr: 0, ma: 0, me: 0, mo: 0, mp: 0 },
     condizioni: [], sfinimento: 0,
     risorse: [], tratti: [], competenzeAltre: '', note: '',
+    talenti: [], maestrie: [],   // talenti con effetto automatico; armi di cui si usa la maestria (id del manuale)
     modelli: [], animazione: '',
     storicoDadi: [],
   };
+}
+
+// Aggiornamento alle regole 2024 dei personaggi creati prima: collega armi e attacchi alle armi del manuale
+// (dal nome), riconosce i talenti già scritti nei tratti e sceglie le maestrie delle armi che il personaggio usa.
+function aggiorna2024(pg) {
+  pg.attacchi.forEach((a) => { if (a.arma === undefined) a.arma = R.armaDaNome(a.nome)?.id || null; });
+  pg.inventario.forEach((o) => { if (o.tipo === 'arma' && o.arma === undefined) o.arma = R.armaDaNome(o.nome)?.id || null; });
+  pg.incantesimi.forEach((s) => { if (s.sempre === undefined) s.sempre = /^sempre preparat/i.test(s.descrizione || ''); });
+  if (!pg._talentiControllati) {
+    const titoli = pg.tratti.map((t) => t.titolo.toLowerCase());
+    for (const id of R.TALENTI_AUTOMATICI) {
+      const nome = TALENTI_ORIGINE[id].nome.toLowerCase();
+      if (titoli.some((t) => t === nome || t.startsWith(nome + ' ')) && !pg.talenti.includes(id)) pg.talenti.push(id);
+    }
+    pg._talentiControllati = true;
+  }
+  if (!pg._maestrieControllate) {
+    const max = R.maestrieMax(pg);
+    if (max && !pg.maestrie.length) pg.maestrie = [...new Set(pg.attacchi.map((a) => a.arma).filter((id) => id && R.armaDaId(id)?.maestria))].slice(0, max);
+    pg._maestrieControllate = true;
+  }
 }
 
 // Aggiunge i campi mancanti a personaggi salvati con versioni precedenti
@@ -56,5 +80,6 @@ export function normalizza(pg) {
   pg.pf = { ...base.pf, ...pg.pf };
   pg.ca = { ...base.ca, ...pg.ca };
   pg.monete = { ...base.monete, ...pg.monete };
+  try { aggiorna2024(pg); } catch (e) { console.error('Aggiornamento 2024 non riuscito', e); }
   return pg;
 }

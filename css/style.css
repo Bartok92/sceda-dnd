@@ -199,10 +199,10 @@ textarea.campo { resize: vertical; line-height: 1.45; }
 
 .fab-dadi {
   position: fixed; right: 16px; bottom: calc(var(--tabbar) + var(--sicuro-basso) + 16px);
-  width: 62px; height: 62px; border-radius: 50%; z-index: 20;
+  width: 54px; height: 54px; border-radius: 50%; z-index: 20;
   background: radial-gradient(circle at 35% 30%, #d84444, #6d0f0f 70%);
   border: 2px solid var(--oro); box-shadow: 0 6px 20px rgba(0, 0, 0, .6), 0 0 18px rgba(207, 49, 49, .5);
-  font-size: 1.8rem; display: grid; place-items: center;
+  font-size: 1.55rem; display: grid; place-items: center;
 }
 .fab-dadi:active { transform: scale(.92) rotate(-12deg); }
 body[data-schermata="elenco"] .fab-dadi, body[data-schermata="wizard"] .fab-dadi { display: none; }
@@ -414,6 +414,9 @@ button.stat-box:active { transform: scale(.96); }
 .zona-modello { margin: 6px 0 12px; padding: 10px; border-radius: 12px; background: rgba(90, 60, 200, .08); border: 1px solid rgba(107, 60, 201, .3); }
 .file-info { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: .9rem; }
 .box-armatura { padding: 10px; border-radius: 12px; background: rgba(142, 27, 27, .06); border: 1px solid rgba(142, 27, 27, .25); margin-bottom: 10px; }
+.box-multiclasse { padding: 10px; border-radius: 12px; background: rgba(184, 134, 11, .08); border: 1px solid rgba(184, 134, 11, .35); margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+.riga-multiclasse { padding-bottom: 8px; border-bottom: 1px dashed rgba(90, 67, 48, .3); }
+.riga-multiclasse .griglia2 { align-items: end; }
 
 /* ───────── Note ───────── */
 .tratto { border-bottom: 1px solid rgba(90, 67, 48, .2); padding: 4px 0; }
@@ -562,3 +565,52 @@ button.stat-box:active { transform: scale(.96); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ───────── Regole 2024: armi, maestrie, privilegi, avvisi ───────── */
+.att-extra { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.chip-maestria, .chip-mini { font-size: .74rem; padding: 3px 9px; border-radius: 99px; min-height: 26px; border: 1px solid var(--carta-bordo); background: rgba(255, 250, 235, .55); color: var(--inchiostro2); }
+.chip-maestria.attiva { background: linear-gradient(#b8872c, #8a6118); border-color: var(--oro-scuro); color: #fff6df; font-weight: 700; }
+.chip-mini { background: rgba(142, 27, 27, .08); border-color: rgba(142, 27, 27, .35); color: var(--rosso); }
+.avviso-mini { font-size: .72rem; color: var(--rosso); font-weight: 700; align-self: center; }
+.box-arma, .box-info { padding: 10px 12px; border-radius: 12px; background: rgba(255, 250, 235, .55); border: 1px solid var(--carta-bordo); margin-bottom: 12px; }
+.box-arma .chips { margin: 8px 0 0; }
+.box-arma .nota { margin: 8px 0 0; }
+.arma-riga { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: .85rem; color: var(--inchiostro2); }
+.arma-riga strong { font-size: 1.05rem; color: var(--rosso); }
+.box-info strong { display: block; color: var(--inchiostro); }
+.box-info small { color: var(--inchiostro2); }
+.card.avvisi { border-left: 5px solid var(--rosso-vivo); }
+.card.avvisi p { margin: 3px 0; font-size: .86rem; color: var(--rosso); font-weight: 600; }
+.stat-box.ridotta strong { color: var(--rosso); }
+.stat-box.ridotta small:last-child { text-transform: none; letter-spacing: 0; color: var(--rosso); font-size: .66rem; line-height: 1.15; }
+.nota.oro { color: #7a5412; font-weight: 700; }
+.privilegio { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(90, 67, 48, .2); }
+.priv-info { flex: 1; min-width: 0; }
+.priv-info strong { display: block; }
+.priv-info small { color: var(--inchiostro2); font-size: .76rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.priv-valore { font: 700 1.4rem var(--font-titoli); color: var(--rosso); min-width: 58px; text-align: center; }
+.card.da-preparare { display: flex; flex-direction: column; gap: 4px; }
+.dp-riga { display: flex; justify-content: space-between; align-items: baseline; }
+.dp-riga strong { font: 700 1.25rem var(--font-titoli); color: var(--inchiostro); }
+.dp-riga strong.rosso { color: var(--rosso-vivo); }
+.da-preparare small { color: var(--inchiostro2); font-size: .75rem; }
+.badge.rosso { background: var(--rosso-vivo); }
+.badge.verde { background: var(--verde); }
+.chip.bloccato { opacity: .85; }
+.chip.disab { opacity: .45; }
+.segmenti.larghi { display: flex; width: 100%; margin-bottom: 10px; }
+.segmenti.larghi button { flex: 1; }
+.pannello-corpo > div > .voce-prontuario, .pannello-corpo .voce-prontuario { display: block; width: 100%; margin-bottom: 6px; }
+.testo-conferma { white-space: pre-line; }
+/* Riga attacco: testo a tutta larghezza sopra, maestria e pulsanti di tiro sotto */
+.attacco { grid-template-columns: 1fr auto auto auto; grid-template-areas: "info info info info" "extra colpire danni crit"; row-gap: 8px; }
+.attacco .att-info { grid-area: info; cursor: pointer; }
+.attacco .att-extra { grid-area: extra; margin: 0; align-self: center; }
+.attacco .btn-tiro:not(.danni):not(.crit) { grid-area: colpire; }
+.attacco .btn-tiro.danni { grid-area: danni; }
+.attacco .btn-tiro.crit { grid-area: crit; }
+.att-info small { display: block; line-height: 1.3; }
+/* Risorse con tanti usi (es. Imposizione delle mani): contatore invece dei pallini */
+.ris-contatore { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.ris-contatore .ris-num { font: 700 1.3rem var(--font-titoli); color: var(--inchiostro); min-width: 64px; text-align: center; }
+.ris-contatore .ris-num small { font-size: .8rem; color: var(--inchiostro2); }

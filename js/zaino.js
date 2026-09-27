@@ -3,9 +3,49 @@ import { h, pannello, conferma, avviso, selezione, campo, fmtKg, fmtMB, scegliFi
 import { stato, modifica } from './stato.js';
 import { nuovoId, db } from './db.js';
 import * as R from './regole.js';
-import { inputNum, inputTesto, areaTesto, card } from './scheda.js';
+import { inputNum, inputTesto, areaTesto, card, selettoreArma, schedaArma, testoProprieta } from './scheda.js';
+import { ARMI, ARMATURE, CATEGORIE_ARMI, MAESTRIE } from './dati2024.js';
 
 const pg = () => stato.pg;
+
+// ───── Oggetti dal manuale 2024 ─────
+const descrArma = (a) => `${a.danni} ${a.tipoDanno}${a.prop.length ? ' · ' + testoProprieta(a) : ''}${a.maestria ? ' · Maestria: ' + MAESTRIE[a.maestria].nome : ''}${a.nota ? '. ' + a.nota : ''}`;
+const descrArmatura = (a) => a.tipo === 'scudo' ? '+2 alla CA.'
+  : `CA ${a.base}${a.tipo === 'leggera' ? ' + DES' : a.tipo === 'media' ? ' + DES (max 2)' : ''} · armatura ${a.tipo}${a.forza ? ` · serve Forza ${a.forza}` : ''}${a.furtivita ? ' · svantaggio a Furtività' : ''}`;
+const oggettoBase = () => ({ id: nuovoId(), qta: 1, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' });
+export const oggettoDaArma = (a) => ({ ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArma(a), tipo: 'arma', slot: 'manoDx', arma: a.id });
+export const oggettoDaArmatura = (a) => a.tipo === 'scudo'
+  ? { ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArmatura(a), tipo: 'scudo', slot: 'manoSx', bonusCA: 2, armaturaId: a.id }
+  : { ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArmatura(a), tipo: 'armatura', slot: 'armatura',
+    armatura: { base: a.base, tipo: a.tipo, forza: a.forza, furtivita: a.furtivita }, armaturaId: a.id };
+
+function apriManuale() {
+  let scheda = 'armi'; let creaAttacco = true;
+  pannello('Dal manuale 2024', (c) => {
+    const disegna = () => {
+      const p = pg();
+      c.replaceChildren(
+        h('div.segmenti.larghi', [['armi', 'Armi'], ['armature', 'Armature e scudi']].map(([v, t]) => h('button' + (scheda === v ? '.attivo' : ''), { onclick: () => { scheda = v; disegna(); } }, t))),
+        scheda === 'armi' ? [
+          h('label.check', h('input', { type: 'checkbox', checked: creaAttacco, onchange: (e) => (creaAttacco = e.target.checked) }), ' Crea anche l\'attacco (Combatti)'),
+          CATEGORIE_ARMI.map(([cat, tipo, et]) => h('div', h('h4.sottotitolo', et),
+            ARMI.filter((a) => a.cat === cat && a.tipo === tipo).map((a) => h('button.voce-prontuario', { onclick: () => {
+              modifica((x) => {
+                x.inventario.push(oggettoDaArma(a));
+                if (creaAttacco && !x.attacchi.some((t) => t.arma === a.id)) x.attacchi.push({ id: nuovoId(), ...R.attaccoDaArma(x, a) });
+              }, 'equip');
+              avviso(`Aggiunto allo zaino: ${a.nome}${creaAttacco ? ' (con il suo attacco)' : ''}`);
+            } }, h('strong', a.nome),
+            h('small', `${a.danni} ${a.tipoDanno} · ${MAESTRIE[a.maestria].nome}${a.prop.length ? ' · ' + testoProprieta(a) : ''} · ${fmtKg(a.peso)} · ${a.costo}${R.competenteArma(p, a) ? '' : ' · non competente'}`)))))]
+          : [['leggera', 'Armature leggere'], ['media', 'Armature medie'], ['pesante', 'Armature pesanti'], ['scudo', 'Scudo']].map(([t, et]) => h('div', h('h4.sottotitolo', et),
+            ARMATURE.filter((a) => a.tipo === t).map((a) => h('button.voce-prontuario', { onclick: () => {
+              modifica((x) => x.inventario.push(oggettoDaArmatura(a)), 'equip');
+              avviso(`Aggiunto allo zaino: ${a.nome}. Tocca "Equipaggia" per usarlo nella CA`);
+            } }, h('strong', a.nome), h('small', `${descrArmatura(a)} · ${fmtKg(a.peso)} · ${a.costo}`))))));
+    };
+    disegna();
+  }, { pieno: true });
+}
 const TIPI = [['oggetto', 'Oggetto'], ['arma', 'Arma'], ['armatura', 'Armatura'], ['scudo', 'Scudo'], ['consumabile', 'Consumabile'], ['tesoro', 'Tesoro']];
 const nomeSlot = (id) => R.SLOT_OGGETTO.find((s) => s.id === id)?.nome || '';
 
@@ -35,8 +75,9 @@ export function renderZaino(c) {
       h('div.riga-titolo', h('h3.card-titolo', `Zaino (${p.inventario.length})`)),
       p.inventario.length ? p.inventario.map(rigaOggetto) : h('p.vuoto', 'Lo zaino è vuoto.'),
       h('div.riga-btn',
-        h('button.btn.aggiungi', { onclick: () => apriOggetto() }, '+ Nuovo oggetto'),
-        h('button.btn.aggiungi', { onclick: aggiungiEsempi }, '✨ Oggetti 3D di prova'))));
+        h('button.btn.aggiungi', { onclick: apriManuale }, '📖 Dal manuale'),
+        h('button.btn.aggiungi', { onclick: () => apriOggetto() }, '+ Nuovo oggetto')),
+      h('button.btn-link', { onclick: aggiungiEsempi }, '✨ Aggiungi gli oggetti 3D di prova')));
 }
 
 function rigaOggetto(o) {
@@ -87,10 +128,25 @@ export function apriOggetto(o, slotIniziale = '') {
     const disegnaExtra = () => {
       const p = pg();
       zonaExtra.replaceChildren(
+        ogg.tipo === 'arma' ? h('div',
+          campo('Arma del manuale', selettoreArma(ogg.arma, (id) => {
+            const a = R.armaDaId(id); ogg.arma = a ? a.id : null;
+            if (a) { if (!ogg.nome.trim()) { ogg.nome = a.nome; nomeInp.value = a.nome; } if (!ogg.peso) { ogg.peso = a.peso; pesoInp.value = a.peso; } if (!ogg.descrizione) { ogg.descrizione = descrArma(a); descrInp.value = ogg.descrizione; } }
+            disegnaExtra();
+          }, { vuoto: '— Non collegata —', senzArmi: false })),
+          R.armaDaId(ogg.arma) ? schedaArma(p, R.armaDaId(ogg.arma)) : null) : null,
         ogg.slot === 'armatura' || ogg.tipo === 'armatura' ? h('div.box-armatura',
+          campo('Armatura del manuale', selezione([['', '— Personalizzata —'], ...ARMATURE.filter((a) => a.tipo !== 'scudo').map((a) => [a.id, `${a.nome} (CA ${a.base}, ${a.tipo})`])], ogg.armaturaId || '', (id) => {
+            const a = ARMATURE.find((x) => x.id === id); ogg.armaturaId = a?.id || '';
+            if (a) { ogg.armatura = { base: a.base, tipo: a.tipo, forza: a.forza, furtivita: a.furtivita }; if (!ogg.nome.trim()) { ogg.nome = a.nome; nomeInp.value = a.nome; } if (!ogg.peso) { ogg.peso = a.peso; pesoInp.value = a.peso; } }
+            disegnaExtra();
+          })),
           h('div.griglia2',
             campo('CA base', inputNum(ogg.armatura?.base ?? 11, (v) => (ogg.armatura = { ...(ogg.armatura || { tipo: 'leggera' }), base: v }))),
             campo('Tipo', selezione(R.TIPI_ARMATURA, ogg.armatura?.tipo || 'leggera', (v) => (ogg.armatura = { ...(ogg.armatura || { base: 11 }), tipo: v })))),
+          h('div.griglia2',
+            campo('Forza minima', inputNum(ogg.armatura?.forza || 0, (v) => (ogg.armatura = { ...(ogg.armatura || { base: 11, tipo: 'leggera' }), forza: Math.max(0, v) }))),
+            h('label.check', h('input', { type: 'checkbox', checked: !!ogg.armatura?.furtivita, onchange: (e) => (ogg.armatura = { ...(ogg.armatura || { base: 11, tipo: 'leggera' }), furtivita: e.target.checked }) }), ' Svantaggio a Furtività')),
           campo('Versione del personaggio da mostrare', selezione([['', '— Modello predefinito —'], ...p.modelli.map((m) => [m.id, m.nome])], ogg.versioneModello, set('versioneModello'))),
           h('p.nota', 'Quando equipaggi questa armatura, il visualizzatore 3D mostra la versione scelta del tuo personaggio. Le versioni si caricano nella scheda Eroe → Modelli 3D.')) : null,
         campo('Bonus alla CA (scudi, anelli…)', inputNum(ogg.bonusCA, set('bonusCA'))));
@@ -113,15 +169,18 @@ export function apriOggetto(o, slotIniziale = '') {
         !bone && ogg.modello ? h('p.nota', 'Scegli uno slot visibile (testa, collo, schiena, mani, cintura) per vedere l\'oggetto sul personaggio.') : null);
     };
     const slotSel = selezione(R.SLOT_OGGETTO, ogg.slot, (v) => { ogg.slot = v; if (v === 'scudo' && !ogg.bonusCA) ogg.bonusCA = 2; disegnaExtra(); disegnaModello(); });
+    const nomeInp = inputTesto(ogg.nome, set('nome'), { placeholder: 'Es. Spada lunga' });
+    const pesoInp = inputNum(ogg.peso, set('peso'), { step: 0.1, inputmode: 'decimal' });
+    const descrInp = areaTesto(ogg.descrizione, set('descrizione'));
     c.append(
-      campo('Nome', inputTesto(ogg.nome, set('nome'), { placeholder: 'Es. Spada lunga' })),
+      campo('Nome', nomeInp),
       h('div.griglia3',
         campo('Quantità', inputNum(ogg.qta, set('qta'), { min: 0 })),
-        campo('Peso (kg)', inputNum(ogg.peso, set('peso'), { step: 0.1, inputmode: 'decimal' })),
-        campo('Tipo', selezione(TIPI, ogg.tipo, (v) => { ogg.tipo = v; if (v === 'scudo') { ogg.slot ||= 'manoSx'; ogg.bonusCA ||= 2; slotSel.value = ogg.slot; } if (v === 'armatura') { ogg.slot = 'armatura'; slotSel.value = 'armatura'; } disegnaExtra(); }))),
+        campo('Peso (kg)', pesoInp),
+        campo('Tipo', selezione(TIPI, ogg.tipo, (v) => { ogg.tipo = v; if (v === 'scudo') { ogg.slot ||= 'manoSx'; ogg.bonusCA ||= 2; slotSel.value = ogg.slot; } if (v === 'armatura') { ogg.slot = 'armatura'; slotSel.value = 'armatura'; } if (v === 'arma' && !ogg.slot) { ogg.slot = 'manoDx'; slotSel.value = 'manoDx'; } disegnaExtra(); }))),
       campo('Si equipaggia in', slotSel),
       zonaModello, zonaExtra,
-      campo('Descrizione', areaTesto(ogg.descrizione, set('descrizione'))),
+      campo('Descrizione', descrInp),
       h('div.riga-btn',
         !nuovo ? h('button.btn.pericolo', { onclick: async () => {
           if (!(await conferma(`Eliminare "${ogg.nome}" dallo zaino?`, { si: 'Elimina', pericolo: true }))) return;
