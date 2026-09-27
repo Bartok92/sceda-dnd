@@ -45,6 +45,25 @@ export function avviso(testo, tipo = '') {
   setTimeout(() => { t.classList.remove('vis'); setTimeout(() => t.remove(), 400); }, tipo === 'errore' ? 5000 : 2600);
 }
 
+// ───── Tasto Indietro (Android) e gesto "indietro" del browser ─────
+// Si tiene una sola voce "di guardia" nella cronologia: premendo Indietro si chiude il pannello in cima,
+// oppure l'app torna all'elenco dei personaggi; solo se non c'è niente da chiudere si esce davvero.
+const pannelliAperti = [];
+let guardia = false;
+let gestoreIndietro = () => false;
+let daProteggere = () => false;
+export function impostaIndietro(gestore, proteggi) { gestoreIndietro = gestore; daProteggere = proteggi; }
+export function armaIndietro() {
+  if (guardia) return;
+  try { history.pushState({ guardia: true }, ''); guardia = true; } catch {}
+}
+window.addEventListener('popstate', () => {
+  guardia = false;
+  if (pannelliAperti.length) pannelliAperti[pannelliAperti.length - 1]();
+  else if (!gestoreIndietro()) { history.back(); return; }
+  if (pannelliAperti.length || daProteggere()) armaIndietro();
+});
+
 // Pannello che sale dal basso. Restituisce { el, chiudi }
 export function pannello(titolo, contenuto, { pieno = false, onChiudi, classe = '' } = {}) {
   const sfondo = h('div.velo');
@@ -68,8 +87,11 @@ export function pannello(titolo, contenuto, { pieno = false, onChiudi, classe = 
   testa.addEventListener('touchmove', (e) => { if (y0 == null) return; const dy = Math.max(0, e.touches[0].clientY - y0); p.style.transform = `translateY(${dy}px)`; }, { passive: true });
   testa.addEventListener('touchend', (e) => { if (y0 == null) return; const dy = e.changedTouches[0].clientY - y0; y0 = null; p.style.transform = ''; if (dy > 90) chiudi(); });
   let chiuso = false;
+  pannelliAperti.push(chiudi);
+  armaIndietro();
   function chiudi() {
     if (chiuso) return; chiuso = true;
+    const i = pannelliAperti.indexOf(chiudi); if (i >= 0) pannelliAperti.splice(i, 1);
     ctr.classList.remove('aperto');
     setTimeout(() => ctr.remove(), 300);
     onChiudi?.();

@@ -22,6 +22,28 @@ export const QUALITA = {
 };
 
 let renderer, scena, camera, controlli, orologio, contenitore, gruppoPersonaggio, marcatore, runeAnello, braci, torcia;
+let luceContorno, luceRossa, matPietra, matOro; // riferimenti usati dai temi
+let temaScena = 'grimorio';
+let torciaBase = 3.2;
+
+// Colori della scena per ogni tema grafico
+const TEMI_3D = {
+  grimorio: { nebbia: 0x120709, contorno: [0x7090ff, 1.6], rossa: [0xff3030, 0.8], torcia: [0xff8a2a, 3.2], oro: [0xd9a94e, 0x000000, 0], rune: [0xffffff, 0.55], pietra: [0x3a302c, 0x000000, 0], braci: 0.05 },
+  lava: { nebbia: 0x080202, contorno: [0xff4a1a, 2.4], rossa: [0xff2208, 1.9], torcia: [0xff5a1a, 4.2], oro: [0xff6a1f, 0xff3000, 1.4], rune: [0xff6a2a, 0.9], pietra: [0x1a1312, 0x2a0400, 0.6], braci: 0.075 },
+};
+export function impostaTema(id) {
+  temaScena = TEMI_3D[id] ? id : 'grimorio';
+  if (!scena) return;
+  const t = TEMI_3D[temaScena];
+  scena.fog.color.setHex(t.nebbia);
+  luceContorno.color.setHex(t.contorno[0]); luceContorno.intensity = t.contorno[1];
+  luceRossa.color.setHex(t.rossa[0]); luceRossa.intensity = t.rossa[1];
+  torcia.color.setHex(t.torcia[0]); torciaBase = t.torcia[1];
+  matOro.color.setHex(t.oro[0]); matOro.emissive.setHex(t.oro[1]); matOro.emissiveIntensity = t.oro[2];
+  matPietra.color.setHex(t.pietra[0]); matPietra.emissive.setHex(t.pietra[1]); matPietra.emissiveIntensity = t.pietra[2];
+  runeAnello.material.color.setHex(t.rune[0]); runeAnello.material.opacity = t.rune[1];
+  braci.material.size = t.braci;
+}
 let qualita = QUALITA.bilanciata;
 let visibile = false, inPausa = false, animPausa = false;
 let loader = null;
@@ -88,6 +110,7 @@ function creaRenderer() {
   creaAmbiente();
   creaLuci();
   creaPiedistallo();
+  impostaTema(temaScena);
   gruppoPersonaggio = new THREE.Group();
   scena.add(gruppoPersonaggio);
 
@@ -153,10 +176,10 @@ function creaLuci() {
   chiave.shadow.bias = -0.0005;
   chiave.shadow.normalBias = 0.02;
   scena.add(chiave);
-  const contorno = new THREE.DirectionalLight(0x7090ff, 1.6);
+  const contorno = luceContorno = new THREE.DirectionalLight(0x7090ff, 1.6);
   contorno.position.set(-3, 2.5, -3.5);
   scena.add(contorno);
-  const rosso = new THREE.DirectionalLight(0xff3030, 0.8);
+  const rosso = luceRossa = new THREE.DirectionalLight(0xff3030, 0.8);
   rosso.position.set(3, 1, -3);
   scena.add(rosso);
   torcia = new THREE.PointLight(0xff8a2a, 3.5, 6, 1.6);
@@ -181,14 +204,14 @@ function texturaRune() {
 }
 
 function creaPiedistallo() {
-  const pietra = new THREE.MeshStandardMaterial({ color: 0x3a302c, roughness: 0.92, metalness: 0.05 });
+  const pietra = matPietra = new THREE.MeshStandardMaterial({ color: 0x3a302c, roughness: 0.92, metalness: 0.05 });
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.9, 0.16, 64), pietra);
   base.position.y = -0.08; base.receiveShadow = true; base.castShadow = true;
   scena.add(base);
   const gradino = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.02, 0.08, 64), pietra);
   gradino.position.y = -0.2; gradino.receiveShadow = true;
   scena.add(gradino);
-  const oro = new THREE.MeshStandardMaterial({ color: 0xd9a94e, metalness: 1, roughness: 0.3 });
+  const oro = matOro = new THREE.MeshStandardMaterial({ color: 0xd9a94e, metalness: 1, roughness: 0.3 });
   const bordo = new THREE.Mesh(new THREE.TorusGeometry(0.79, 0.018, 12, 96), oro);
   bordo.rotation.x = Math.PI / 2; bordo.position.y = 0.0;
   scena.add(bordo);
@@ -236,7 +259,7 @@ function fotogramma() {
   const t = orologio.elapsedTime;
   if (mod?.mixer && !animPausa) mod.mixer.update(dt);
   if (runeAnello) runeAnello.rotation.z += dt * 0.08;
-  if (torcia) torcia.intensity = 3.2 + Math.sin(t * 9) * 0.35 + Math.sin(t * 23.7) * 0.25;
+  if (torcia) torcia.intensity = torciaBase + Math.sin(t * 9) * 0.35 + Math.sin(t * 23.7) * 0.25;
   if (braci) {
     const p = braci.geometry.getAttribute('position'); const v = braci.geometry.userData.vel;
     for (let i = 0; i < v.length; i++) {

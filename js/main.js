@@ -1,5 +1,5 @@
 // Avvio dell'app: elenco personaggi, creazione guidata, scheda a schede scorrevoli.
-import { h, $, avviso, pannello, conferma, scegliFile, selezione, campo, fmtMB } from './ui.js';
+import { h, $, avviso, pannello, conferma, scegliFile, selezione, campo, fmtMB, impostaIndietro, armaIndietro } from './ui.js';
 import { db, chiediPersistenza, stimaSpazio, nuovoId } from './db.js';
 import { stato, suCambio, salvaOra, normalizza } from './stato.js';
 import * as S from './scheda.js';
@@ -8,17 +8,27 @@ import { renderZaino } from './zaino.js';
 import { avviaCreazione } from './wizard.js';
 import { apriTiraDadi } from './dadi.js';
 import { esportaBackup, importaBackup } from './backup.js';
+import { ico, sigillo } from './icone.js';
+import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, pulsanteTema, nomeTema } from './temi.js';
 
-export const VERSIONE_APP = '1.1.0';
+export const VERSIONE_APP = '1.3.0';
 
 const TABS = [
-  { id: 'eroe', nome: 'Eroe', icona: '♜' },
-  { id: 'combatti', nome: 'Combatti', icona: '⚔' },
-  { id: 'car', nome: 'Abilità', icona: '◈' },
-  { id: 'magie', nome: 'Magie', icona: '✦' },
-  { id: 'zaino', nome: 'Zaino', icona: '⚱' },
-  { id: 'note', nome: 'Note', icona: '✎' },
+  { id: 'eroe', nome: 'Eroe', icona: 'eroe' },
+  { id: 'combatti', nome: 'Combatti', icona: 'combatti' },
+  { id: 'car', nome: 'Abilità', icona: 'abilita' },
+  { id: 'magie', nome: 'Magie', icona: 'magie' },
+  { id: 'zaino', nome: 'Zaino', icona: 'zaino' },
+  { id: 'note', nome: 'Note', icona: 'note' },
 ];
+
+// Braci luminose che salgono sullo sfondo (schermata iniziale e creazione)
+function braci(n = 16) {
+  return h('div.braci', Array.from({ length: n }, () => {
+    const r = Math.random;
+    return h('span', { style: `--x:${(r() * 100).toFixed(1)}%;--d:${(7 + r() * 9).toFixed(1)}s;--r:${(-r() * 14).toFixed(1)}s;--dx:${(r() * 80 - 40).toFixed(0)}px;--s:${(2 + r() * 3).toFixed(1)}px` });
+  }));
+}
 const RENDER = {
   eroe: (c) => { S.renderIntestazione(c); S.renderVita(c); S.renderCondizioni(c); },
   combatti: S.renderCombattimento,
@@ -29,6 +39,14 @@ const RENDER = {
 };
 
 const app = $('#app');
+
+// Installazione dell'app su Android/PC: il browser avvisa quando si può installare
+let promptInstalla = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); promptInstalla = e;
+  if (document.body.dataset.schermata === 'elenco') mostraElenco();
+});
+window.addEventListener('appinstalled', () => { promptInstalla = null; avviso('App installata! La trovi tra le tue app.'); });
 let modelli = null; // modulo modelli.js (3D), caricato alla prima apertura della scheda
 
 // ───────────────────────── Elenco personaggi ─────────────────────────
@@ -38,11 +56,13 @@ async function mostraElenco() {
   stato.pg = null;
   document.body.dataset.vita = '';
   document.body.dataset.schermata = 'elenco';
+  applicaTema(temaGlobale());
   const elenco = (await db.tutti('personaggi')).sort((a, b) => (b.modificato || 0) - (a.modificato || 0));
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /Android/i.test(navigator.userAgent);
   const ultimoBackup = await db.impostazione('ultimoBackup');
-  app.replaceChildren(h('div.elenco',
+  app.replaceChildren(braci(), h('div.elenco',
     h('header.logo',
       h('img', { src: 'icons/icon-192.png', alt: '' }),
       h('h1', 'Scheda D&D'),
@@ -51,16 +71,22 @@ async function mostraElenco() {
       h('strong', '📲 Installa l\'app'),
       h('p', 'Tocca il pulsante Condividi ', h('span.ico-share', '⬆'), ' in Safari e scegli "Aggiungi alla schermata Home". Così funziona a schermo intero e anche senza internet.'),
       h('p.nota', 'Nota: l\'app installata ha un archivio separato da Safari. Crea i personaggi dopo averla installata (o usa il backup per trasferirli).')) : null,
+    !ios && !standalone && (promptInstalla || android) ? h('div.card.suggerimento',
+      h('strong', ico('installa'), ' Installa l\'app'),
+      promptInstalla
+        ? h('button.btn.primario', { onclick: async () => { const e = promptInstalla; promptInstalla = null; e.prompt(); await e.userChoice.catch(() => null); mostraElenco(); } }, ico('installa'), 'Installa sul telefono')
+        : h('p', 'Apri il menu del browser (⋮) e scegli "Installa app" oppure "Aggiungi a schermata Home". Così funziona a schermo intero e anche senza internet.')) : null,
     elenco.length ? h('div.lista-pg', elenco.map((p) => h('div.pg-card', { onclick: (e) => !e.target.closest('button') && apriPersonaggio(p.id) },
-      h('div.pg-card-icona', (p.classe || '?')[0]),
-      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })} · Liv. ${p.livello}`),
+      h('div.pg-card-icona', sigillo(p.classe)),
+      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })}`), h('span.pg-livello', p.livello),
         h('div.barra.mini', h('div.barra-riemp', { style: { width: Math.max(0, Math.min(100, (p.pf.att / p.pf.max) * 100)) + '%' } }))),
       h('button.btn-icona', { 'aria-label': 'Opzioni', onclick: () => menuPersonaggio(p) }, '⋮')))) :
       h('div.card.vuota', h('p', 'Nessun personaggio ancora.'), h('p.nota', 'Crea il tuo primo eroe con la procedura guidata.')),
-    h('button.btn.grande.primario', { onclick: nuovoPersonaggio }, '✦ Nuovo personaggio'),
+    h('button.btn.grande.primario', { onclick: nuovoPersonaggio }, ico('piu'), 'Nuovo personaggio'),
     h('div.riga-btn',
-      h('button.btn', { onclick: () => esportaBackup().catch((e) => avviso(e.message, 'errore')) }, '💾 Backup completo'),
-      h('button.btn', { onclick: ripristina }, '📥 Ripristina backup')),
+      h('button.btn', { onclick: () => esportaBackup().catch((e) => avviso(e.message, 'errore')) }, ico('salva'), 'Backup completo'),
+      h('button.btn', { onclick: ripristina }, ico('libro'), 'Ripristina')),
+    h('div.riga-btn', pulsanteTema(() => apriSceltaTema())),
     elenco.length && (!ultimoBackup || Date.now() - ultimoBackup > 14 * 864e5) ? h('p.nota.centrato', ultimoBackup ? `Ultimo backup: ${new Date(ultimoBackup).toLocaleDateString('it-IT')}. Fanne uno nuovo ogni tanto!` : 'Consiglio: fai un backup ogni tanto, per non perdere nulla.') : null,
     h('button.btn-link.centrato', { onclick: apriImpostazioni }, '⚙ Impostazioni e informazioni'),
     h('p.piede', `Versione ${VERSIONE_APP} · Dungeons & Dragons è un marchio di Wizards of the Coast. Regole dal SRD 5.1 e 5.2 (CC-BY-4.0).`)));
@@ -94,8 +120,10 @@ async function pulisciFileOrfani() {
 
 function nuovoPersonaggio() {
   document.body.dataset.schermata = 'wizard';
+  applicaTema(temaGlobale());
+  armaIndietro();
   const cont = h('div.schermata-wizard');
-  app.replaceChildren(cont);
+  app.replaceChildren(braci(10), cont);
   avviaCreazione(cont, {
     onAnnulla: mostraElenco,
     onFine: async (pg) => {
@@ -144,6 +172,7 @@ async function apriImpostazioni() {
         h('p', `Modelli 3D salvati: ${files.length} (${fmtMB(files.reduce((s, f) => s + (f.dimensione || 0), 0))})`),
         spazio ? h('p', `Spazio usato dall'app: ${fmtMB(spazio.usage || 0)}${spazio.quota ? ' su ' + fmtMB(spazio.quota) + ' disponibili' : ''}`) : null,
         h('p', persistente ? '✔ Archivio protetto: il sistema non cancellerà i dati da solo.' : '⚠ Archivio non protetto: installa l\'app nella schermata Home e fai backup regolari.')),
+      h('button.btn', { onclick: () => apriSceltaTema() }, ico('tavolozza'), `Tema grafico: ${nomeTema(temaGlobale())}`),
       h('button.btn', { onclick: async () => { await pulisciFileOrfani(); avviso('Pulizia completata'); } }, '🧹 Elimina i file 3D non più usati'),
       h('button.btn', { onclick: async () => {
         const reg = await navigator.serviceWorker?.getRegistration();
@@ -152,7 +181,7 @@ async function apriImpostazioni() {
       } }, '⟳ Controlla aggiornamenti'),
       h('div.crediti',
         h('p', `Scheda D&D versione ${VERSIONE_APP}. Funziona senza internet: tutti i dati restano sul tuo telefono.`),
-        h('p', 'Grafica 3D: three.js (licenza MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
+        h('p', 'Caratteri: Cinzel, Cinzel Decorative e Alegreya (SIL Open Font License). Grafica 3D: three.js (licenza MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
         h('p', 'Regole e incantesimi dal System Reference Document 5.1 di Wizards of the Coast (CC-BY-4.0).')));
   });
 }
@@ -167,6 +196,8 @@ async function apriPersonaggio(id) {
   stato.pg = normalizza(p);
   await db.salvaImpostazione('ultimo', id);
   document.body.dataset.schermata = 'scheda';
+  applicaTema(temaPer(stato.pg));
+  armaIndietro();
   costruisciScheda();
   renderTutte();
   vaiTab(stato.tab || 'eroe', false);
@@ -179,6 +210,7 @@ async function apriPersonaggio(id) {
       vw.suStato(aggiornaStato3D);
     }
     vw.init(strutturaScheda.vista);
+    vw.impostaTema?.(document.documentElement.dataset.tema);
     modelli.aggiornaVista();
   } catch (e) {
     console.error(e);
@@ -199,15 +231,15 @@ function costruisciScheda() {
     panes[t.id] = h('section.tab-pane', { 'data-tab': t.id }, t.id === 'eroe' ? vista : null, contenuti[t.id]);
     return panes[t.id];
   }));
-  const barra = h('nav.tabbar', TABS.map((t) => h('button', { 'data-tab': t.id, onclick: () => vaiTab(t.id) }, h('span.tab-icona', t.icona), h('span.tab-nome', t.nome))));
+  const barra = h('nav.tabbar', TABS.map((t) => h('button', { 'data-tab': t.id, 'aria-label': t.nome, onclick: () => vaiTab(t.id) }, h('span.tab-icona', ico(t.icona)), h('span.tab-nome', t.nome))));
   const titolo = h('div.top-titolo');
   app.replaceChildren(h('div.scheda',
     h('header.barra-top',
-      h('button.btn-icona', { 'aria-label': 'Personaggi', onclick: mostraElenco }, '☰'),
+      h('button.btn-icona', { 'aria-label': 'Personaggi', onclick: mostraElenco }, ico('personaggi')),
       titolo,
-      h('button.btn-icona', { 'aria-label': 'Backup', onclick: () => esportaBackup([stato.pg.id]).catch((e) => avviso(e.message, 'errore')) }, '💾')),
-    scorrevole, barra,
-    h('button.fab-dadi', { 'aria-label': 'Tira i dadi', onclick: apriTiraDadi }, h('span', '🎲'))));
+      h('button.btn-icona', { 'aria-label': 'Menu', onclick: menuScheda }, ico('altro'))),
+    braci(18), scorrevole, barra,
+    h('button.fab-dadi', { 'aria-label': 'Tira i dadi', onclick: apriTiraDadi }, ico('dado'))));
   let t0 = null;
   scorrevole.addEventListener('scroll', () => {
     clearTimeout(t0);
@@ -219,6 +251,32 @@ function costruisciScheda() {
   }, { passive: true });
   strutturaScheda = { vista, stato3d, overlay, panes, contenuti, scorrevole, barra, titolo };
 }
+
+// Menu ⋮ della scheda: tema, backup, dati, elenco
+function menuScheda() {
+  const p = stato.pg; if (!p) return;
+  pannello(p.nome, (c, chiudi) => {
+    c.append(h('div.lista-scelte',
+      h('button.btn.grande', { onclick: () => { chiudi(); apriSceltaTema({ pg: p, salvaPg: (t) => salvaTemaPg(t) }); } }, ico('tavolozza'), `Tema grafico: ${nomeTema(temaPer(p))}${p.tema ? ' (solo suo)' : ''}`),
+      h('button.btn.grande', { onclick: () => { chiudi(); S.apriModificaBase(); } }, ico('note'), 'Modifica i dati del personaggio'),
+      h('button.btn.grande', { onclick: () => { chiudi(); esportaBackup([p.id]).catch((e) => avviso(e.message, 'errore')); } }, ico('salva'), 'Backup di questo personaggio'),
+      h('button.btn.grande', { onclick: () => { chiudi(); mostraElenco(); } }, ico('personaggi'), 'Torna ai personaggi')));
+  });
+}
+async function salvaTemaPg(t) {
+  const { modifica } = await import('./stato.js');
+  modifica((x) => (x.tema = t), 'silenzio');
+}
+// Il 3D segue il tema (luci, nebbia, anello di rune)
+document.addEventListener('tema-cambiato', async (e) => {
+  if (!modelli) return;
+  const vw = await modelli.viewer();
+  vw.impostaTema?.(e.detail);
+});
+// Tasto Indietro: dalla scheda o dalla creazione si torna all'elenco
+impostaIndietro(
+  () => { if (['scheda', 'wizard'].includes(document.body.dataset.schermata)) { mostraElenco(); return true; } return false; },
+  () => ['scheda', 'wizard'].includes(document.body.dataset.schermata));
 
 function evidenziaTab() {
   strutturaScheda.barra.querySelectorAll('button').forEach((b) => b.classList.toggle('attivo', b.dataset.tab === stato.tab));
@@ -287,10 +345,10 @@ function aggiornaOverlay3D() {
         stato.pg.animazione = v; (await import('./stato.js')).salvaPresto();
         (await modelli.viewer()).avviaAnimazione(v);
       }, { class: 'sel-anim' }) : h('span'),
-      h('button.btn.piccolo.vetro', { onclick: () => modelli?.apriGestioneModelli() }, '🧍 Modelli 3D')) : null,
+      h('button.btn.piccolo.vetro', { onclick: () => modelli?.apriGestioneModelli() }, ico('figura'), 'Modelli 3D')) : null,
     !senzaModello ? h('div.ov-basso',
       h('span.suggerimento3d', '1 dito ruota · 2 dita zoom · doppio tocco ricentra'),
-      h('button.btn-icona.vetro', { 'aria-label': 'Ingrandisci', onclick: () => strutturaScheda.vista.classList.toggle('espansa') }, '⤢')) : null);
+      h('button.btn-icona.vetro', { 'aria-label': 'Ingrandisci', onclick: () => strutturaScheda.vista.classList.toggle('espansa') }, ico('espandi'))) : null);
 }
 
 // ───────────────────────── Avvio ─────────────────────────
@@ -321,6 +379,7 @@ async function avvio() {
   registraSW();
   chiediPersistenza();
   try {
+    await caricaTemaGlobale();
     const ultimo = await db.impostazione('ultimo');
     if (ultimo && (await db.leggi('personaggi', ultimo))) await apriPersonaggio(ultimo);
     else await mostraElenco();

@@ -6,6 +6,7 @@ import * as R from './regole.js';
 import { esegui } from './dadi.js';
 import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE } from './dati2024.js';
 import { oggettoDaArma } from './zaino.js';
+import { sigillo } from './icone.js';
 
 // Arma di partenza suggerita per classe (se la Destrezza è più alta, per Guerriero e Ladro un'arma a distanza/accurata)
 const ARMA_PARTENZA = { Barbaro: 'ascia-bipenne', Bardo: 'pugnale', Chierico: 'mazza', Druido: 'falcetto', Guerriero: 'spada-lunga', Ladro: 'spada-corta',
@@ -119,7 +120,7 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
     c.append(
       h('div.classi-griglia', Object.entries(R.CLASSI).map(([nome, cl]) => h('button.classe-card' + (pg.classe === nome ? '.attivo' : ''), {
         onclick: () => { pg.classe = nome; pg.abilita = {}; applicaClasse(); disegna(); },
-      }, h('strong', nome), h('small', `d${cl.dv} · TS ${cl.ts.join(', ')}`), cl.magia !== 'nessuna' ? h('small.magico', '✦ incantatore') : null))),
+      }, sigillo(nome, 'sigillo'), h('strong', nome), h('small', `d${cl.dv} · TS ${cl.ts.join(', ')}`), cl.magia !== 'nessuna' ? h('small.magico', '✦ incantatore') : null))),
       COMPETENZE_CLASSE[pg.classe] ? h('p.nota', COMPETENZE_CLASSE[pg.classe].testo) : null,
       h('div.griglia2',
         campo('Livello di partenza', contatore(pg.livello, (v) => (pg.livello = v), { min: 1, max: 20 })),

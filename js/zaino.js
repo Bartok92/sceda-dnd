@@ -5,6 +5,9 @@ import { nuovoId, db } from './db.js';
 import * as R from './regole.js';
 import { inputNum, inputTesto, areaTesto, card, selettoreArma, schedaArma, testoProprieta } from './scheda.js';
 import { ARMI, ARMATURE, CATEGORIE_ARMI, MAESTRIE } from './dati2024.js';
+import { ico } from './icone.js';
+
+const ICONE_SLOT = { testa: 'eroe', collo: 'amuleto', schiena: 'zaino', manoDx: 'spada', manoSx: 'scudo', cintura: 'borsa', armatura: 'armatura' };
 
 const pg = () => stato.pg;
 
@@ -69,13 +72,13 @@ export function renderZaino(c) {
       h('div.slot-griglia', [...R.SLOT, { id: 'armatura', nome: 'Armatura', icona: '🛡️' }].map((s) => {
         const o = eq.find((x) => x.slot === s.id);
         return h('button.slot-box' + (o ? '.pieno' : ''), { onclick: () => o ? apriOggetto(o) : scegliPerSlot(s.id) },
-          h('span.slot-icona', s.icona), h('small', s.nome), h('strong', o ? o.nome : '—'), o?.modello ? h('span.badge3d', '3D') : null);
+          h('span.slot-icona', ico(ICONE_SLOT[s.id] || 'zaino')), h('small', s.nome), h('strong', o ? o.nome : '—'), o?.modello ? h('span.badge3d', '3D') : null);
       }))),
     h('div.card',
       h('div.riga-titolo', h('h3.card-titolo', `Zaino (${p.inventario.length})`)),
       p.inventario.length ? p.inventario.map(rigaOggetto) : h('p.vuoto', 'Lo zaino è vuoto.'),
       h('div.riga-btn',
-        h('button.btn.aggiungi', { onclick: apriManuale }, '📖 Dal manuale'),
+        h('button.btn.aggiungi', { onclick: apriManuale }, ico('libro'), 'Dal manuale'),
         h('button.btn.aggiungi', { onclick: () => apriOggetto() }, '+ Nuovo oggetto')),
       h('button.btn-link', { onclick: aggiungiEsempi }, '✨ Aggiungi gli oggetti 3D di prova')));
 }

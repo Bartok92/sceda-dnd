@@ -4,6 +4,7 @@ import { stato, modifica, salvaPresto } from './stato.js';
 import { nuovoId } from './db.js';
 import * as R from './regole.js';
 import { tira, selettoreModo } from './dadi.js';
+import { ico } from './icone.js';
 import { INCANTESIMI_BASE } from './incantesimi-base.js';
 import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento } from './dati2024.js';
 
@@ -169,9 +170,9 @@ export function renderVita(c) {
     h('div.vita-testa', h('h3.card-titolo', 'Punti ferita'), temp > 0 ? h('span.badge.blu', `+${temp} temporanei`) : null),
     h('div.vita-centro',
       h('button.pf-btn.meno', { onclick: () => cambiaPF(-1), 'aria-label': 'Togli 1 PF' }, '−'),
-      h('button.pf-valore', { onclick: apriTastierinoPF },
+      h('button.pf-valore', { onclick: apriTastierinoPF, style: `--perc:${perc.toFixed(1)}`, 'aria-label': 'Danno o cura' },
         h('span.pf-att', att), h('span.pf-sep', '/'), h('span.pf-max', max),
-        h('small', 'tocca per danno o cura')),
+        h('small', 'danno / cura')),
       h('button.pf-btn.piu', { onclick: () => cambiaPF(1), 'aria-label': 'Aggiungi 1 PF' }, '+')),
     h('div.barra.pf', h('div.barra-riemp', { style: { width: perc + '%' } }), temp > 0 ? h('div.barra-temp', { style: { width: Math.min(100, (temp / max) * 100) + '%' } }) : null),
     h('div.vita-riga',
@@ -187,8 +188,8 @@ export function renderVita(c) {
         h('div.pallini', h('span.lbl', '✖'), [0, 1, 2].map((i) => h('button.pallino.fall' + (i < morte.fall ? '.pieno' : ''), { onclick: () => modifica((x) => (x.tsMorte.fall = i < x.tsMorte.fall ? i : i + 1)) }))),
         att <= 0 ? h('button.btn.piccolo', { onclick: tiroMorte }, 'Tira TS') : null)),
     h('div.riga-btn',
-      h('button.btn', { onclick: riposoBreve }, '☾ Riposo breve'),
-      h('button.btn', { onclick: riposoLungo }, '☀ Riposo lungo'))));
+      h('button.btn', { onclick: riposoBreve }, ico('luna'), 'Riposo breve'),
+      h('button.btn', { onclick: riposoLungo }, ico('sole'), 'Riposo lungo'))));
   document.body.dataset.vita = livelloPF;
 }
 
@@ -314,13 +315,13 @@ export function renderCombattimento(c) {
   c.append(
     avvisi.length ? h('div.card.avvisi', avvisi.map((t) => h('p', '⚠ ' + t))) : null,
     h('div.stat-griglia',
-      h('button.stat-box.scudo', { onclick: apriCA }, h('small', 'CA'), h('strong', ca), h('small', p.ca.modo === 'auto' ? 'auto' : 'manuale')),
-      h('button.stat-box', { onclick: () => tira('1d20' + fmtMod(R.iniziativa(p)), 'Iniziativa', { d20: true }) }, h('small', 'Iniziativa'), h('strong', R.segno(R.iniziativa(p))), h('small', 'tocca e tira')),
-      h('div.stat-box' + (vel.note.length ? '.ridotta' : ''), h('small', 'Velocità'), h('strong', String(vel.valore).replace('.', ',')), h('small', vel.note.length ? vel.note.join(', ') : 'metri')),
-      h('div.stat-box', h('small', 'Competenza'), h('strong', R.segno(R.competenza(p.livello))), h('small', 'bonus')),
-      h('div.stat-box', h('small', 'Perc. passiva'), h('strong', R.percezionePassiva(p)), h('small', 'saggezza')),
+      h('button.stat-box.scudo', { onclick: apriCA }, ico('scudo'), h('small', 'CA'), h('strong', ca), h('small', p.ca.modo === 'auto' ? 'auto' : 'manuale')),
+      h('button.stat-box', { onclick: () => tira('1d20' + fmtMod(R.iniziativa(p)), 'Iniziativa', { d20: true }) }, ico('fulmine'), h('small', 'Iniziativa'), h('strong', R.segno(R.iniziativa(p))), h('small', 'tocca e tira')),
+      h('div.stat-box' + (vel.note.length ? '.ridotta' : ''), ico('passo'), h('small', 'Velocità'), h('strong', String(vel.valore).replace('.', ',')), h('small', vel.note.length ? vel.note.join(', ') : 'metri')),
+      h('div.stat-box', ico('stella'), h('small', 'Competenza'), h('strong', R.segno(R.competenza(p.livello))), h('small', 'bonus')),
+      h('div.stat-box', ico('occhio'), h('small', 'Perc. passiva'), h('strong', R.percezionePassiva(p)), h('small', 'saggezza')),
       (() => { const d = R.dadiVitaTotali(p); const cl = R.elencoClassi(p);
-        return h('div.stat-box', h('small', 'Dadi vita'), h('strong', [...new Set(cl.map((c) => 'd' + c.dv))].join('+')), h('small', `${d.rimasti} rimasti`)); })()),
+        return h('div.stat-box', ico('cuore'), h('small', 'Dadi vita'), h('strong', [...new Set(cl.map((c) => 'd' + c.dv))].join('+')), h('small', `${d.rimasti} rimasti`)); })()),
     h('div.card', h('div.riga-titolo', h('h3.card-titolo', 'Attacchi'), selettoreModo()),
       R.attacchiAzione(p) > 1 ? h('p.nota.oro', `Con l'azione di Attacco fai ${R.attacchiAzione(p)} attacchi (Attacco extra).`) : null,
       p.attacchi.length ? p.attacchi.map(rigaAttacco) : h('p.vuoto', 'Nessun attacco. Aggiungi la tua arma o un trucchetto d\'attacco.'),
@@ -613,9 +614,9 @@ export function renderMagie(c) {
   const max = R.slotMassimi(p); const patto = R.slotPatto(p);
   c.append(
     h('div.stat-griglia.tre',
-      h('div.stat-box', h('small', 'CD incantesimi'), h('strong', cd ?? '—')),
-      h('button.stat-box', { onclick: () => att != null && tira('1d20' + fmtMod(att), 'Attacco con incantesimo', { d20: true }) }, h('small', 'Attacco magico'), h('strong', att != null ? R.segno(att) : '—')),
-      h('button.stat-box', { onclick: apriImpostazioniMagia }, h('small', 'Caratteristica'), h('strong', m.car || '—'), h('small', 'tocca'))),
+      h('div.stat-box', ico('scudo'), h('small', 'CD incantesimi'), h('strong', cd ?? '—')),
+      h('button.stat-box', { onclick: () => att != null && tira('1d20' + fmtMod(att), 'Attacco con incantesimo', { d20: true }) }, ico('magie'), h('small', 'Attacco magico'), h('strong', att != null ? R.segno(att) : '—')),
+      h('button.stat-box', { onclick: apriImpostazioniMagia }, ico('stella'), h('small', 'Caratteristica'), h('strong', m.car || '—'), h('small', 'tocca'))),
     renderDaPreparare(),
     card('Slot incantesimo',
       max.some((n) => n > 0) || patto ? null : h('p.vuoto', 'Nessuno slot. Tocca "Imposta" per scegliere il tipo di incantatore o inserire gli slot a mano.'),
