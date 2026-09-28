@@ -1,11 +1,12 @@
 // Service worker: rende l'app utilizzabile senza internet dopo la prima apertura.
 // Quando pubblichi una nuova versione, aumenta il numero qui sotto.
-const VERSIONE = 'scheda-dnd-v1.5.0';
+const VERSIONE = 'scheda-dnd-v1.6.0';
 
 const FILE_APP = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/ui.js', 'js/db.js', 'js/stato.js', 'js/regole.js', 'js/scheda.js', 'js/zaino.js',
-  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js', 'js/tavolo.js', 'js/master.js',
+  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js', 'js/tavolo.js', 'js/master.js', 'js/iphone.js', 'css/iphone.css',
+  'iphone/', 'iphone/index.html', 'iphone/manifest.webmanifest', 'iphone/avvio-1320x2868.png',
   'fonts/cinzel-latin-500-normal.woff2', 'fonts/cinzel-latin-700-normal.woff2', 'fonts/cinzel-latin-900-normal.woff2',
   'fonts/cinzel-decorative-latin-700-normal.woff2', 'fonts/cinzel-decorative-latin-900-normal.woff2',
   'fonts/alegreya-latin-400-normal.woff2', 'fonts/alegreya-latin-400-italic.woff2', 'fonts/alegreya-latin-500-normal.woff2',
@@ -33,7 +34,9 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   if (req.mode === 'navigate') {
-    e.respondWith(caches.match('index.html').then((r) => r || fetch(req)));
+    // Due ingressi alla stessa app: la versione generica e l'edizione iPhone (cartella iphone/)
+    const pagina = new URL(req.url).pathname.includes('/iphone/') ? 'iphone/index.html' : 'index.html';
+    e.respondWith(caches.match(pagina).then((r) => r || fetch(req)));
     return;
   }
   e.respondWith((async () => {

@@ -13,7 +13,10 @@ import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, p
 import * as T from './tavolo.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.5.0';
+export const VERSIONE_APP = '1.6.0';
+// Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
+export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
+const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
 
 const TABS = [
   { id: 'eroe', nome: 'Eroe', icona: 'eroe' },
@@ -79,6 +82,9 @@ async function mostraElenco() {
       promptInstalla
         ? h('button.btn.primario', { onclick: async () => { const e = promptInstalla; promptInstalla = null; e.prompt(); await e.userChoice.catch(() => null); mostraElenco(); } }, ico('installa'), 'Installa sul telefono')
         : h('p', 'Apri il menu del browser (⋮) e scegli "Installa app" oppure "Aggiungi a schermata Home". Così funziona a schermo intero e anche senza internet.')) : null,
+    EDIZIONE_IPHONE && !elenco.length ? h('div.card.suggerimento',
+      h('strong', '✦ Edizione iPhone'),
+      h('p', 'Per portare qui i tuoi personaggi: nella vecchia app tocca "Backup completo" e salva il file; poi qui tocca "Ripristina" e sceglilo. Arrivano anche i modelli 3D e i tavoli di gioco.')) : null,
     elenco.length ? h('div.lista-pg', elenco.map((p) => h('div.pg-card', { onclick: (e) => !e.target.closest('button') && apriPersonaggio(p.id) },
       h('div.pg-card-icona', sigillo(p.classe)),
       h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })}`), h('span.pg-livello', p.livello),
@@ -93,7 +99,7 @@ async function mostraElenco() {
     h('div.riga-btn', pulsanteTema(() => apriSceltaTema())),
     elenco.length && (!ultimoBackup || Date.now() - ultimoBackup > 14 * 864e5) ? h('p.nota.centrato', ultimoBackup ? `Ultimo backup: ${new Date(ultimoBackup).toLocaleDateString('it-IT')}. Fanne uno nuovo ogni tanto!` : 'Consiglio: fai un backup ogni tanto, per non perdere nulla.') : null,
     h('button.btn-link.centrato', { onclick: apriImpostazioni }, '⚙ Impostazioni e informazioni'),
-    h('p.piede', `Versione ${VERSIONE_APP} · Dungeons & Dragons è un marchio di Wizards of the Coast. Regole dal SRD 5.1 e 5.2 (CC-BY-4.0).`)));
+    h('p.piede', `Versione ${VERSIONE_APP}${EDIZIONE_IPHONE ? ' (iPhone)' : ''} · Dungeons & Dragons è un marchio di Wizards of the Coast. Regole dal SRD 5.1 e 5.2 (CC-BY-4.0).`)));
 }
 
 function menuPersonaggio(p) {
@@ -174,11 +180,11 @@ async function ripristina() {
 async function apriImpostazioni() {
   const spazio = await stimaSpazio();
   const persistente = await navigator.storage?.persisted?.().catch(() => false);
-  const q = await db.impostazione('qualita', 'bilanciata');
+  const q = await db.impostazione('qualita', QUALITA_PREDEFINITA);
   const files = await db.elencoFile();
   pannello('Impostazioni', (c) => {
     c.append(
-      campo('Qualità grafica 3D', selezione([['alta', 'Alta (iPhone recenti)'], ['bilanciata', 'Bilanciata (consigliata)'], ['risparmio', 'Risparmio (batteria e iPhone datati)']], q, async (v) => {
+      campo('Qualità grafica 3D', selezione([['massima', 'Massima (iPhone Pro, piena risoluzione)'], ['alta', 'Alta (iPhone recenti)'], ['bilanciata', 'Bilanciata (consigliata)'], ['risparmio', 'Risparmio (batteria e iPhone datati)']], q, async (v) => {
         await db.salvaImpostazione('qualita', v);
         if (modelli) { const vw = await modelli.viewer(); vw.impostaQualita(v); }
         avviso('Qualità: ' + v + '. Le texture verranno ridotte al prossimo caricamento del modello.');
@@ -195,7 +201,7 @@ async function apriImpostazioni() {
         await reg.update(); avviso('Controllo completato. Se c\'è una nuova versione comparirà un avviso.');
       } }, '⟳ Controlla aggiornamenti'),
       h('div.crediti',
-        h('p', `Scheda D&D versione ${VERSIONE_APP}. Funziona senza internet: tutti i dati restano sul tuo telefono.`),
+        h('p', `Scheda D&D versione ${VERSIONE_APP}${EDIZIONE_IPHONE ? ' · edizione iPhone' : ''}. Funziona senza internet: tutti i dati restano sul tuo telefono.`),
         h('p', 'Caratteri: Cinzel, Cinzel Decorative e Alegreya (SIL Open Font License). Grafica 3D: three.js (licenza MIT). Tavolo di gioco: PeerJS (MIT), jsQR (Apache 2.0), qrcode-generator (MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
         h('p', 'Regole e incantesimi dal System Reference Document 5.1 di Wizards of the Coast (CC-BY-4.0).')));
   });
@@ -221,7 +227,7 @@ async function apriPersonaggio(id) {
     modelli ||= await import('./modelli.js');
     const vw = await modelli.viewer();
     if (!vw.pronto()) {
-      vw.impostaQualita(await db.impostazione('qualita', 'bilanciata'));
+      vw.impostaQualita(await db.impostazione('qualita', QUALITA_PREDEFINITA));
       vw.suStato(aggiornaStato3D);
     }
     vw.init(strutturaScheda.vista);

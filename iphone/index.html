@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Edizione iPhone: stessa app della versione generica (stessi file in ../js e ../css),
+     più css/iphone.css e js/iphone.js. Grazie a <base href="../"> tutti i percorsi puntano ai file comuni,
+     così ogni aggiornamento dell'app vale automaticamente anche per questa edizione. -->
+<html lang="it" data-edizione="iphone">
+<head>
+  <meta charset="utf-8">
+  <base href="../">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
+  <title>D&amp;D Pro Max</title>
+  <meta name="description" content="Scheda del personaggio di Dungeons & Dragons 5e con modello 3D — edizione per iPhone">
+  <meta name="theme-color" content="#0c0706">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="D&amp;D Pro Max">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="iphone/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <!-- Schermata d'avvio alla risoluzione esatta di iPhone 17 Pro Max / 16 Pro Max (1320 × 2868) -->
+  <link rel="apple-touch-startup-image" href="iphone/avvio-1320x2868.png"
+        media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="preload" href="fonts/cinzel-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/alegreya-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/iphone.css">
+</head>
+<body>
+  <div id="app"><div class="avvio"><img src="icons/icon-192.png" alt=""><p>Apro il grimorio…</p></div></div>
+  <div id="pannelli"></div>
+  <div id="toasts"></div>
+  <script type="module" src="js/iphone.js"></script>
+  <script type="module" src="js/main.js"></script>
+  <noscript>Serve JavaScript attivo per usare la scheda.</noscript>
+</body>
+</html>

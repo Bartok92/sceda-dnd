@@ -1,0 +1,59 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Edizione iPhone — pensata per iPhone 17 Pro Max (schermo 440 × 956 punti, Dynamic Island, 120 Hz).
+   Si aggiunge a style.css (in comune con la versione generica): qui solo le differenze.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+html[data-edizione="iphone"] { --tabbar: 70px; }
+html[data-edizione="iphone"] body { touch-action: manipulation; overscroll-behavior: none; -webkit-touch-callout: none; }
+/* Testo dei campi almeno 16 px: così Safari non ingrandisce la pagina quando tocchi un campo */
+html[data-edizione="iphone"] input, html[data-edizione="iphone"] textarea, html[data-edizione="iphone"] select { font-size: max(16px, 1em); }
+
+/* ───── Barra delle schede "fluttuante" in vetro, come le app di iOS 26 ───── */
+html[data-edizione="iphone"] .scheda { grid-template-rows: auto 1fr; }
+html[data-edizione="iphone"] .tabbar {
+  position: fixed; left: 12px; right: 12px; bottom: max(8px, calc(var(--sicuro-basso) - 12px)); z-index: 25;
+  padding: 6px; border-radius: 32px;
+  background: rgba(22, 13, 10, .55);
+  -webkit-backdrop-filter: blur(22px) saturate(170%); backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid rgba(var(--oro-rgb), .28);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 232, 186, .14);
+}
+html[data-edizione="iphone"] .tabbar::before { display: none; }
+html[data-edizione="iphone"] .tabbar button { min-height: 54px; border-radius: 26px; }
+html[data-edizione="iphone"] .tabbar button::before { display: none; }
+html[data-edizione="iphone"] .tabbar button.attivo { background: radial-gradient(70% 90% at 50% 40%, rgba(var(--oro-rgb), .26), rgba(var(--oro-rgb), .08)); box-shadow: inset 0 0 0 1px rgba(var(--oro-rgb), .3); }
+html[data-edizione="iphone"] .tab-pane { padding-bottom: calc(var(--sicuro-basso) + 150px); }
+html[data-edizione="iphone"] .fab-dadi { bottom: calc(max(8px, var(--sicuro-basso) - 12px) + 84px); width: 60px; height: 60px; }
+html[data-edizione="iphone"] #toasts { bottom: calc(max(8px, var(--sicuro-basso) - 12px) + 158px + var(--tastiera, 0px)); }
+
+/* ───── Barra in alto in vetro, sotto la Dynamic Island ───── */
+html[data-edizione="iphone"] .barra-top {
+  background: rgba(12, 7, 6, .74);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+}
+html[data-edizione="iphone"] .btn-icona { width: 46px; height: 46px; }
+
+/* ───── Fogli dal basso come quelli di iOS: angoli più tondi e sempre sopra la tastiera ───── */
+html[data-edizione="iphone"] .pannello {
+  bottom: var(--tastiera, 0px);
+  max-height: calc(92dvh - var(--tastiera, 0px));
+  border-radius: 30px 30px 0 0;
+}
+html[data-edizione="iphone"] .pannello-corpo { padding-bottom: calc(var(--sicuro-basso) + 22px); }
+html[data-edizione="iphone"].tastiera-aperta .pannello-corpo { padding-bottom: 16px; }
+
+/* ───── Modalità Master: barra delle azioni fluttuante ───── */
+html[data-edizione="iphone"] .barra-azioni-master {
+  left: 10px; right: 10px; bottom: max(8px, calc(var(--sicuro-basso) - 12px)); padding: 8px; border-radius: 28px;
+  background: rgba(22, 13, 10, .6);
+  -webkit-backdrop-filter: blur(22px) saturate(170%); backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid rgba(var(--oro-rgb), .3);
+}
+html[data-edizione="iphone"] .barra-azioni-master .btn { border-radius: 20px; }
+html[data-edizione="iphone"] .master-scorri { padding-bottom: calc(var(--sicuro-basso) + 120px); }
+
+/* ───── Schermo grande: pulsante dei dadi e numeri dei PF un po' più generosi ───── */
+@media (min-width: 430px) {
+  html[data-edizione="iphone"] .comp-pf strong { font-size: 1.5rem; }
+  html[data-edizione="iphone"] .striscia-riga { padding: 7px 0; }
+}

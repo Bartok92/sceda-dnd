@@ -16,6 +16,7 @@ export const PREDEFINITI_SLOT = {
 };
 
 export const QUALITA = {
+  massima: { tex: 4096, pr: 3, ombre: true },   // piena risoluzione Retina (iPhone Pro / Pro Max)
   alta: { tex: 4096, pr: 2, ombre: true },
   bilanciata: { tex: 2048, pr: 1.75, ombre: true },
   risparmio: { tex: 1024, pr: 1, ombre: false },

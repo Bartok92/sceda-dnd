@@ -35,7 +35,8 @@ for (const metodo of ['append', 'replaceChildren']) {
   Element.prototype[metodo] = function (...figli) { return originale.apply(this, pulisci(figli)); };
 }
 
-export function vibra(ms = 10) { try { navigator.vibrate?.(ms); } catch {} }
+// Vibrazione: l'edizione iPhone installa un suo "aggancio" (window.__aptica), perché Safari non supporta navigator.vibrate
+export function vibra(ms = 10) { try { if (window.__aptica) return window.__aptica(ms); navigator.vibrate?.(ms); } catch {} }
 
 // Notifica breve in basso
 export function avviso(testo, tipo = '') {
