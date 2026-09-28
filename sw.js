@@ -1,6 +1,6 @@
 // Service worker: rende l'app utilizzabile senza internet dopo la prima apertura.
 // Quando pubblichi una nuova versione, aumenta il numero qui sotto.
-const VERSIONE = 'scheda-dnd-v1.7.0';
+const VERSIONE = 'scheda-dnd-v1.8.0';
 
 const FILE_APP = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',

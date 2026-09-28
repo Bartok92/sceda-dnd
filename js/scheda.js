@@ -188,8 +188,8 @@ export function renderVita(c) {
         h('div.pallini', h('span.lbl', '✖'), [0, 1, 2].map((i) => h('button.pallino.fall' + (i < morte.fall ? '.pieno' : ''), { onclick: () => modifica((x) => (x.tsMorte.fall = i < x.tsMorte.fall ? i : i + 1)) }))),
         att <= 0 ? h('button.btn.piccolo', { onclick: tiroMorte }, 'Tira TS') : null)),
     h('div.riga-btn',
-      h('button.btn', { onclick: riposoBreve }, ico('luna'), 'Riposo breve'),
-      h('button.btn', { onclick: riposoLungo }, ico('sole'), 'Riposo lungo'))));
+      h('button.btn', { onclick: () => riposoBreve() }, ico('luna'), 'Riposo breve'),
+      h('button.btn', { onclick: () => riposoLungo() }, ico('sole'), 'Riposo lungo'))));
   document.body.dataset.vita = livelloPF;
 }
 
@@ -240,8 +240,8 @@ function tiroMorte() {
 
 // ───────────────────────── Riposi ─────────────────────────
 
-function riposoBreve() {
-  pannello('Riposo breve', (c, chiudi) => {
+export function riposoBreve({ titolo = 'Riposo breve' } = {}) {
+  pannello(titolo, (c, chiudi) => {
     const p = pg(); const m = R.mod(p.car.COS);
     const info = h('p');
     const bottoni = h('div');
@@ -271,8 +271,8 @@ function riposoBreve() {
   });
 }
 
-async function riposoLungo() {
-  if (!(await conferma('Riposo lungo (8 ore): PF al massimo, recuperi metà dei dadi vita, tutti gli slot incantesimo e le risorse. Procedo?', { si: 'Riposa' }))) return;
+export async function riposoLungo({ senzaConferma = false } = {}) {
+  if (!senzaConferma && !(await conferma('Riposo lungo (8 ore): PF al massimo, recuperi metà dei dadi vita, tutti gli slot incantesimo e le risorse. Procedo?', { si: 'Riposa' }))) return;
   modifica((x) => {
     x.pf.att = x.pf.max; x.pf.temp = 0;
     // recuperi metà dei dadi vita totali (minimo 1), prima quelli più grandi

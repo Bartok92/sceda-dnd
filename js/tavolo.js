@@ -11,12 +11,16 @@
 // - Azioni: cure, danni, PF temporanei e condizioni viaggiano come messaggi verso il telefono del bersaglio,
 //   che le applica alla sua scheda (con tasto Annulla). Se il bersaglio non è collegato, il centralino le tiene in coda.
 // - Il Master partecipa senza personaggio: vede tutti, manda danni e condizioni, gestisce iniziativa e turni.
+// - Solo al Master arriva anche la scheda completa di ogni giocatore (sola lettura), aggiornata a ogni modifica.
+// - Il Master può chiedere tiri, concedere riposi, dare PE/oggetti/monete, scrivere (a tutti o in privato) e
+//   "mostrare" immagini e testi scegliendo chi li vede: ai giocatori arriva l'elenco aggiornato (vetrina) e le
+//   immagini viaggiano a pezzi, su richiesta, solo verso chi le può vedere.
 import { h, $, avviso, pannello, conferma, chiediTesto, vibra } from './ui.js';
 import { db, nuovoId } from './db.js';
 import { stato, suCambio, modifica } from './stato.js';
 import * as R from './regole.js';
 import { ico, sigillo } from './icone.js';
-import { applicaPF } from './scheda.js';
+import { applicaPF, riposoBreve, riposoLungo } from './scheda.js';
 import { tira } from './dadi.js';
 
 const PREFISSO = 'schedadnd-tavolo-';
@@ -89,6 +93,17 @@ function istantanea(pg) {
 }
 const confrontabile = (s) => s && JSON.stringify({ ...s, t: 0 });
 
+// La scheda completa che vede solo il Master (senza modelli 3D e cronologia dei dadi)
+function schedaPerMaster(pg) {
+  const s = structuredClone(pg);
+  delete s.storicoDadi; delete s.modelli; delete s.animazione;
+  s.inventario = (s.inventario || []).map(({ regolazioni, modello, versioneModello, ...o }) => ({ ...o, ha3d: !!modello }));
+  // Per sicurezza resta sotto i 60 KB (limite dei messaggi su alcuni telefoni): si tolgono prima le descrizioni lunghe
+  if (JSON.stringify(s).length > 60000) (s.incantesimi || []).forEach((x) => { x.descrizione = (x.descrizione || '').slice(0, 200); });
+  if (JSON.stringify(s).length > 60000) { (s.tratti || []).forEach((x) => { x.testo = (x.testo || '').slice(0, 300); }); s.note = (s.note || '').slice(0, 2000); }
+  return s;
+}
+
 // ───────────────────────── Sessione in corso ─────────────────────────
 
 const S = {
@@ -98,6 +113,9 @@ const S = {
   peer: null, conn: null, conns: new Map(),    // ospite: conn verso l'host; host: conn → id partecipante
   presenti: new Set(), chiuso: true, timer: null, generazione: 0,
   pfInSospeso: null,
+  presentiNoti: new Set(),                     // per accorgersi di chi arriva (il Master sincronizza vetrina e schede)
+  ultimaScheda: '',                            // ultima scheda completa mandata al Master (per non ripeterla)
+  ricezioni: new Map(), chiesteImg: new Set(), // immagini della vetrina in arrivo a pezzi
 };
 export const tavoloAttivo = () => (S.fase === 'spento' ? null : tavoloDa(S.codice));
 export const faseTavolo = () => S.fase;
@@ -109,12 +127,33 @@ const mioPgId = () => (S.io && !S.io.master ? S.io.id : null);
 const ascoltatori = new Set();
 export const suTavolo = (fn) => ascoltatori.add(fn);
 function aggiornaViste() {
+  controllaPresenze();
   ascoltatori.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
   aggiornaElementiVivi();
 }
-// Risposte per il Master (iniziativa dei giocatori)
+// Risposte per il Master (iniziativa e tiri richiesti ai giocatori)
 const ascoltaRisposte = new Set();
 export const suRisposta = (fn) => ascoltaRisposte.add(fn);
+// Messaggi in arrivo (il Master li usa per l'avviso e il contatore dei non letti)
+const ascoltaMessaggi = new Set();
+export const suMessaggio = (fn) => ascoltaMessaggi.add(fn);
+// Chi è appena arrivato al tavolo (riceve un elenco di id)
+const ascoltaPresenza = new Set();
+export const suPresenza = (fn) => ascoltaPresenza.add(fn);
+// Il Master fornisce le immagini della vetrina: async (id) → { v, dati } (dati = data URL)
+let fornitoreImmagine = null;
+export const fornisciImmagini = (fn) => { fornitoreImmagine = fn; };
+
+function controllaPresenze() {
+  const attivi = S.fase === 'collegato' ? S.presenti : new Set();
+  const nuovi = [...attivi].filter((id) => id !== S.io?.id && !S.presentiNoti.has(id));
+  S.presentiNoti = new Set(attivi);
+  if (!nuovi.length) return;
+  // Un giocatore manda la sua scheda quando il Master arriva
+  const tv = tavoloDa(S.codice);
+  if (tv?.master && nuovi.includes(tv.master.id)) setTimeout(() => inviaSchedaAlMaster({ forza: true }), 300);
+  ascoltaPresenza.forEach((f) => { try { f(nuovi); } catch (e) { console.error(e); } });
+}
 
 function inviaA(conn, msg) { try { if (conn?.open) { conn.send(msg); return true; } } catch (e) { console.warn(e); } return false; }
 function aTutti(msg, tranne = null) { for (const c of S.conns.keys()) if (c !== tranne) inviaA(c, msg); }
@@ -275,7 +314,7 @@ function consegna(m) {
   if (m.a === S.io.id) { perMe(m); return; }
   const c = connDi(m.a);
   if (c && inviaA(c, m)) return;
-  if (m.tipo !== 'azione') return;   // solo le azioni aspettano chi non c'è
+  if (m.tipo !== 'azione' && m.tipo !== 'messaggio') return;   // solo azioni e messaggi aspettano chi non c'è
   (tv.inAttesa[m.a] ||= []).push(m);
   salvaTavoli();
 }
@@ -356,8 +395,27 @@ function applicaNomeDaVoci(tv, voci) {
 function perMe(m) {
   if (m.tipo === 'azione') applicaAzione(m);
   else if (m.tipo === 'risposta') { if (S.io.master) ascoltaRisposte.forEach((f) => f(m)); }
-  else if (m.tipo === 'richiesta') { if (!S.io.master && m.cosa === 'iniziativa') chiestaIniziativa(m); }
+  else if (m.tipo === 'richiesta') {
+    if (S.io.master) return;
+    if (m.cosa === 'iniziativa') chiestaIniziativa(m);
+    else if (m.cosa === 'scheda') inviaSchedaAlMaster({ forza: true });
+    else if (m.cosa === 'tiro') chiestoTiro(m);
+    else if (m.cosa === 'riposo') chiestoRiposo(m);
+  }
   else if (m.tipo === 'turno') impostaTurno(tavoloDa(S.codice), m.turno);
+  else if (m.tipo === 'scheda') { if (S.io.master) riceviScheda(m); }
+  else if (m.tipo === 'messaggio') riceviMessaggio(m);
+  else if (m.tipo === 'vetrina') { if (!S.io.master) riceviVetrina(m); }
+  else if (m.tipo === 'chiediImg') { if (S.io.master) inviaImmagine(m); }
+  else if (m.tipo === 'pezzo') { if (!S.io.master) riceviPezzo(m); }
+}
+
+// Messaggio diretto a un partecipante (passa dal centralino; se sono io il centralino lo consegno io)
+export function mandaA(destId, dati) {
+  if (S.fase !== 'collegato' || !destId) return false;
+  const m = { id: nuovoId(), t: Date.now(), ...dati, a: destId, da: { id: S.io.id, nome: S.io.nome } };
+  if (S.ruolo === 'host') { consegna(m); if (m.tipo !== 'pezzo') { salvaTavoli(); aggiornaViste(); } return true; }
+  return inviaA(S.conn, m);
 }
 
 // ───────────────────────── Registro ─────────────────────────
@@ -414,13 +472,248 @@ function annotaCambiamenti(prima, dopo) {
   if (dopo.tsMorte.fall >= 3 && prima.tsMorte.fall < 3) aggiungiVoce(`${n} ha fallito tre tiri salvezza contro la morte…`, { tipo: 'pf' });
 }
 
-// Quando cambia il mio personaggio, lo comunico ai compagni
-let timerStato = null;
+// Quando cambia il mio personaggio, lo comunico ai compagni (e la scheda completa al Master)
+let timerStato = null, timerScheda = null;
 suCambio(() => {
   if (S.fase === 'spento' || !mioPgId() || stato.pg?.id !== mioPgId()) return;
   clearTimeout(timerStato);
   timerStato = setTimeout(pubblicaStato, 500);
+  clearTimeout(timerScheda);
+  timerScheda = setTimeout(() => inviaSchedaAlMaster(), 1500);
 });
+
+// ───────────────────────── Scheda completa per il Master ─────────────────────────
+
+function inviaSchedaAlMaster({ forza = false } = {}) {
+  const tv = tavoloDa(S.codice);
+  if (!tv?.master || S.fase !== 'collegato' || !mioPgId() || stato.pg?.id !== mioPgId() || !S.presenti.has(tv.master.id)) return;
+  const pg = schedaPerMaster(stato.pg);
+  const js = JSON.stringify(pg);
+  if (!forza && js === S.ultimaScheda) return;
+  if (mandaA(tv.master.id, { tipo: 'scheda', pg })) S.ultimaScheda = js;
+}
+function riceviScheda(m) {
+  const tv = tavoloDa(S.codice);
+  if (!tv || !m.pg?.id) return;
+  (tv.schede ||= {})[m.pg.id] = { pg: m.pg, t: m.t || Date.now() };
+}
+export const schedaDi = (id) => tavoloAttivo()?.schede?.[id] || null;
+export function chiediSchede(ids) {
+  let ok = 0;
+  for (const id of ids) if (mandaA(id, { tipo: 'richiesta', cosa: 'scheda' })) ok++;
+  return ok;
+}
+
+// ───────────────────────── Messaggi tra Master e giocatori ─────────────────────────
+// tv.chat: [{ id, t, da: 'master' | idGiocatore, a: 'master' | 'tutti' | idGiocatore, daNome, testo, letto }]
+
+function potaChat(tv) { if (tv.chat.length > 400) tv.chat.splice(0, tv.chat.length - 400); }
+
+// dest: per il Master 'tutti' o l'id di un giocatore; per un giocatore è sempre il Master
+export function inviaMessaggio(dest, testo) {
+  const tv = tavoloDa(S.codice);
+  testo = String(testo || '').trim();
+  if (!tv || !testo) return false;
+  if (S.fase !== 'collegato') { avviso('Non sei collegato al tavolo: aspetta che torni il pallino verde.', 'errore'); return false; }
+  const idMsg = nuovoId();
+  const destinatari = S.io.master ? (dest === 'tutti' ? elencoCompagni(tv).map((m) => m.id) : [dest]) : [tv.master?.id].filter(Boolean);
+  if (!destinatari.length) { avviso(S.io.master ? 'Nessun giocatore al tavolo' : 'Il Master non si è ancora seduto al tavolo', 'errore'); return false; }
+  let ok = false;
+  for (const d of destinatari) ok = mandaA(d, { tipo: 'messaggio', testo, tutti: dest === 'tutti', idMsg }) || ok;
+  if (!ok) return false;
+  (tv.chat ||= []).push({ id: idMsg, t: Date.now(), da: S.io.master ? 'master' : S.io.id, a: S.io.master ? dest : 'master', daNome: S.io.nome, testo, letto: true });
+  potaChat(tv); salvaTavoli(); aggiornaViste();
+  return true;
+}
+
+function riceviMessaggio(m) {
+  const tv = tavoloDa(S.codice);
+  if (!tv) return;
+  tv.chat ||= [];
+  const id = m.idMsg || m.id;
+  if (tv.chat.some((x) => x.id === id)) return;
+  const voce = { id, t: m.t || Date.now(), da: S.io.master ? m.da.id : 'master', a: S.io.master ? 'master' : (m.tutti ? 'tutti' : S.io.id), daNome: m.da?.nome, testo: String(m.testo || ''), letto: false };
+  tv.chat.push(voce); potaChat(tv);
+  vibra([25, 30, 25]);
+  if (S.io.master) ascoltaMessaggi.forEach((f) => { try { f(voce); } catch (e) { console.error(e); } });
+  else mostraMessaggio(voce);
+}
+
+export function segnaLetti(filtro) {
+  const tv = tavoloDa(S.codice);
+  let n = 0;
+  for (const v of tv?.chat || []) if (!v.letto && filtro(v)) { v.letto = true; n++; }
+  if (n) { salvaTavoli(); aggiornaViste(); }
+}
+export const nonLetti = (filtro = () => true) => (tavoloAttivo()?.chat || []).filter((v) => !v.letto && filtro(v)).length;
+
+// Il giocatore riceve un messaggio del Master: finestra con "Rispondi"
+function mostraMessaggio(v) {
+  pannello(v.a === 'tutti' ? '✉ Il Master, a tutti' : '✉ Il Master, solo a te', (c, chiudi) => {
+    c.append(h('p.messaggio-master', v.testo),
+      h('div.riga-btn',
+        h('button.btn', { onclick: () => chiudi() }, 'Ho letto'),
+        h('button.btn.primario', { onclick: async () => { chiudi(); await rispondiAlMaster(); } }, 'Rispondi')));
+  }, { classe: 'stretto', onChiudi: () => segnaLetti((x) => x.id === v.id) });
+}
+export async function rispondiAlMaster() {
+  const t = await chiediTesto('Scrivi al Master', '', { etichetta: 'Lo leggerà solo il Master', multiriga: true });
+  if (t && t.trim() && inviaMessaggio('master', t)) avviso('Messaggio inviato al Master');
+}
+
+// ───────────────────────── Tiri richiesti dal Master ─────────────────────────
+// tiro: { tipo: 'abilita'|'ts'|'caratteristica'|'libero', chiave, espr, cd, mostraCd, modo, nota, pubblico }
+
+export function descriviTiro(t) {
+  const car = R.CARATTERISTICHE.find((c) => c.id === t.chiave)?.nome;
+  if (t.tipo === 'abilita') return `Prova di ${R.ABILITA.find((a) => a.id === t.chiave)?.nome || t.chiave}`;
+  if (t.tipo === 'ts') return `Tiro salvezza su ${car || t.chiave}`;
+  if (t.tipo === 'caratteristica') return `Prova di ${car || t.chiave}`;
+  return t.nome || `Tiro ${t.espr || '1d20'}`;
+}
+export function bonusTiro(pg, t) {
+  try {
+    if (t.tipo === 'abilita') return R.bonusAbilita(pg, R.ABILITA.find((a) => a.id === t.chiave));
+    if (t.tipo === 'ts') return R.bonusTS(pg, t.chiave);
+    if (t.tipo === 'caratteristica') return R.bonusProva(pg, t.chiave);
+  } catch (e) { console.error(e); }
+  return 0;
+}
+
+function chiestoTiro(m) {
+  const pg = stato.pg;
+  if (!pg || pg.id !== mioPgId()) return;
+  const t = m.tiro || {};
+  const etichetta = descriviTiro(t);
+  const bonus = bonusTiro(pg, t);
+  const d20 = t.tipo !== 'libero' || /^1?d20/i.test(t.espr || '');
+  const espr = t.tipo === 'libero' ? (t.espr || '1d20') : `1d20${bonus ? (bonus > 0 ? '+' : '') + bonus : ''}`;
+  const modo = ['vantaggio', 'svantaggio'].includes(t.modo) ? t.modo : 'normale';
+  const rispondi = (valore, naturale = null) => {
+    mandaA(m.da.id, { tipo: 'risposta', cosa: 'tiro', richiesta: m.id, pgId: pg.id, nome: pg.nome, valore, naturale, bonus });
+    if (t.mostraCd && t.cd) setTimeout(() => avviso(valore >= t.cd ? `${etichetta}: ${valore} contro CD ${t.cd}, superata!` : `${etichetta}: ${valore} contro CD ${t.cd}, fallita`, valore >= t.cd ? '' : 'errore'), 1400);
+  };
+  vibra([30, 40, 30]);
+  pannello(`🎲 ${etichetta}`, (c, chiudi) => {
+    const inp = h('input.campo.campo-numero', { type: 'number', inputMode: 'numeric', placeholder: 'es. 15' });
+    c.append(
+      h('p', `${m.da?.nome || 'Il Master'} ti chiede: `, h('strong', etichetta),
+        t.mostraCd && t.cd ? ` · CD ${t.cd}` : '', modo !== 'normale' ? ` · con ${modo}` : ''),
+      t.nota ? h('p.nota', t.nota) : null,
+      h('button.btn.grande.primario', { onclick: () => {
+        const r = tira(espr, etichetta, { d20, modoTiro: modo });
+        if (r) { chiudi(); rispondi(r.totale, r.naturale); }
+      } }, `🎲 Tira ora (${espr.replace('1d20', 'd20')}${modo !== 'normale' ? ', ' + modo : ''})`),
+      h('p.nota.centrato', 'oppure, se tiri con il dado vero, scrivi il risultato totale'),
+      inp,
+      h('button.btn.grande', { onclick: () => { const v = Number(inp.value); if (!inp.value || Number.isNaN(v)) return avviso('Scrivi il risultato', 'errore'); chiudi(); rispondi(v); } }, 'Invia al Master'));
+  }, { classe: 'stretto' });
+}
+
+export function chiediTiro(ids, tiro) {
+  let ok = 0; const id = nuovoId();
+  for (const d of ids) if (mandaA(d, { tipo: 'richiesta', cosa: 'tiro', tiro, id })) ok++;
+  return ok ? id : null;
+}
+
+// ───────────────────────── Riposi concessi dal Master ─────────────────────────
+
+function chiestoRiposo(m) {
+  if (!stato.pg || stato.pg.id !== mioPgId()) return;
+  const lungo = m.riposo === 'lungo';
+  vibra([30, 40, 30]);
+  pannello(lungo ? '☀ Riposo lungo' : '☾ Riposo breve', (c, chiudi) => {
+    c.append(h('p', `${m.da?.nome || 'Il Master'} concede un riposo ${lungo ? 'lungo (8 ore)' : 'breve (1 ora)'}.`),
+      h('p.nota', lungo ? 'PF al massimo, metà dei dadi vita, tutti gli slot e le risorse.' : 'Puoi spendere dadi vita per recuperare PF; si ricaricano le risorse "a riposo breve".'),
+      h('div.riga-btn',
+        h('button.btn', { onclick: () => chiudi() }, 'Non ora'),
+        h('button.btn.primario', { onclick: () => {
+          chiudi();
+          if (lungo) riposoLungo({ senzaConferma: true }); else riposoBreve({ titolo: 'Riposo breve concesso dal Master' });
+          aggiungiVoce(`${stato.pg.nome} fa un riposo ${lungo ? 'lungo' : 'breve'}`, { tipo: 'pf' });
+        } }, lungo ? '☀ Riposa' : '☾ Riposa')));
+  }, { classe: 'stretto' });
+}
+export function concediRiposo(ids, riposo) {
+  let ok = 0;
+  for (const d of ids) if (mandaA(d, { tipo: 'richiesta', cosa: 'riposo', riposo })) ok++;
+  return ok;
+}
+
+// ───────────────────────── Vetrina: cose che il Master mostra ─────────────────────────
+// Il giocatore tiene tv.vetrina = [{ id, titolo, testo, img, v, visto }]; le immagini stanno a parte in
+// IndexedDB (impostazione "vetrina-img-<id>" = { v, dati }) e si chiedono al Master solo se mancano.
+
+const PEZZO = 16000;
+
+function riceviVetrina(m) {
+  const tv = tavoloDa(S.codice);
+  if (!tv) return;
+  const prima = new Map((tv.vetrina || []).map((c) => [c.id, c]));
+  tv.vetrina = (m.contenuti || []).map((c) => ({ ...c, visto: !!(prima.get(c.id)?.visto && prima.get(c.id).v === c.v) }));
+  for (const c of tv.vetrina) if (c.img) assicuraImmagine(c, m.da.id);
+  for (const id of prima.keys()) if (!tv.vetrina.some((c) => c.id === id)) db.salvaImpostazione('vetrina-img-' + id, null).catch(() => {});
+  const nuovi = tv.vetrina.filter((c) => !prima.has(c.id) || prima.get(c.id).v !== c.v);
+  const daAprire = (m.evidenzia && tv.vetrina.find((c) => c.id === m.evidenzia)) || nuovi[nuovi.length - 1];
+  if (daAprire) { vibra([40, 30, 40]); apriContenuto(daAprire, { dalMaster: true }); }
+}
+
+async function assicuraImmagine(c, masterId) {
+  const vi = c.vi ?? c.v;   // versione dell'immagine (cambiare solo il testo non la fa riscaricare)
+  const salvata = await db.impostazione('vetrina-img-' + c.id);
+  if (salvata?.v === vi) return;
+  const chiave = c.id + ':' + vi;
+  if (S.chiesteImg.has(chiave)) return;
+  S.chiesteImg.add(chiave);
+  mandaA(masterId, { tipo: 'chiediImg', img: c.id });
+}
+
+async function inviaImmagine(m) {
+  const im = await fornitoreImmagine?.(m.img);
+  if (!im?.dati) return;
+  const n = Math.ceil(im.dati.length / PEZZO);
+  for (let i = 0; i < n; i++) mandaA(m.da.id, { tipo: 'pezzo', img: m.img, v: im.v, i, n, dati: im.dati.slice(i * PEZZO, (i + 1) * PEZZO) });
+}
+
+function riceviPezzo(m) {
+  const chiave = m.img + ':' + m.v;
+  let r = S.ricezioni.get(chiave);
+  if (!r) { r = { n: m.n, parti: new Array(m.n), arrivati: 0 }; S.ricezioni.set(chiave, r); }
+  if (r.parti[m.i] == null) { r.parti[m.i] = m.dati; r.arrivati++; }
+  if (r.arrivati < r.n) return;
+  S.ricezioni.delete(chiave);
+  const dati = r.parti.join('');
+  db.salvaImpostazione('vetrina-img-' + m.img, { v: m.v, dati }).then(() => {
+    document.dispatchEvent(new CustomEvent('vetrina-img', { detail: { id: m.img, dati } }));
+  }).catch(console.error);
+}
+
+// Finestra che mostra un contenuto (immagine a tutta larghezza: un tocco la ingrandisce)
+export function apriContenuto(c, { dalMaster = false, datiImmagine = null } = {}) {
+  const tv = tavoloAttivo();
+  const voce = tv?.vetrina?.find((x) => x.id === c.id);
+  if (voce && !voce.visto) { voce.visto = true; salvaTavoli(); aggiornaViste(); }
+  pannello(dalMaster ? `📜 ${c.titolo || 'Dal Master'}` : (c.titolo || 'Contenuto'), (corpo) => {
+    const zonaImg = h('div.vetrina-img');
+    const mettiImmagine = (dati) => {
+      const img = h('img', { src: dati, alt: c.titolo || '' });
+      zonaImg.replaceChildren(img);
+      zonaImg.onclick = () => zonaImg.classList.toggle('zoom');
+    };
+    if (c.img) {
+      zonaImg.append(h('p.nota.centrato', 'Sto ricevendo l\'immagine dal Master…'));
+      if (datiImmagine) mettiImmagine(datiImmagine);
+      else db.impostazione('vetrina-img-' + c.id).then((s) => { if (s?.dati) mettiImmagine(s.dati); });
+      const quandoArriva = (e) => { if (!zonaImg.isConnected) return document.removeEventListener('vetrina-img', quandoArriva); if (e.detail.id === c.id) mettiImmagine(e.detail.dati); };
+      document.addEventListener('vetrina-img', quandoArriva);
+    }
+    corpo.append(
+      dalMaster ? h('p.nota', 'Il Master vi mostra:') : null,
+      c.img ? zonaImg : null,
+      c.img ? h('p.nota.centrato', 'Tocca l\'immagine per ingrandirla') : null,
+      c.testo ? h('div.vetrina-testo', c.testo) : null);
+  }, { pieno: !!c.img });
+}
 function pubblicaStato({ annota = true } = {}) {
   const tv = tavoloDa(S.codice);
   if (!tv || !mioPgId() || stato.pg?.id !== mioPgId()) return;
@@ -450,8 +743,13 @@ function descriviAzione(az, da, chi, prima, dopo) {
   if (az.tipo === 'cura') return `${da} cura ${chi}: +${dopo.att - prima.att} PF${motivo} · PF ${prima.att} → ${dopo.att}`;
   if (az.tipo === 'pftemp') return `${da} dà ${az.valore} PF temporanei a ${chi}${motivo}`;
   if (az.tipo === 'condizione') return az.attiva ? `${da}: ${chi} ora è ${nomeCondizione(az.id)}${motivo}` : `${da}: ${chi} non è più ${nomeCondizione(az.id)}${motivo}`;
+  if (az.tipo === 'pe') return `${da} dà ${az.valore} PE a ${chi}${motivo}`;
+  if (az.tipo === 'ispirazione') return `${da} dà l'ispirazione eroica a ${chi}${motivo}`;
+  if (az.tipo === 'oggetto') return `${da} dà a ${chi}: ${az.oggetto?.nome || 'un oggetto'}${(az.oggetto?.qta || 1) > 1 ? ' ×' + az.oggetto.qta : ''}${motivo}`;
+  if (az.tipo === 'monete') return `${da} dà a ${chi} ${testoMonete(az.monete)}${motivo}`;
   return `${da} → ${chi}`;
 }
+export const testoMonete = (m = {}) => R.MONETE.filter((c) => Number(m[c.id]) > 0).map((c) => `${m[c.id]} ${c.sigla || c.id}`).join(', ') || 'nessuna moneta';
 
 // Il mio telefono riceve un'azione: la applico alla scheda (se è aperta) e offro "Annulla"
 function applicaAzione(m) {
@@ -462,7 +760,9 @@ function applicaAzione(m) {
   tv.applicate.push(m.id); if (tv.applicate.length > 300) tv.applicate.splice(0, tv.applicate.length - 300);
   chiudiPFInSospeso();
   const az = m.azione || {};
-  const prima = { pf: { ...stato.pg.pf }, condizioni: [...stato.pg.condizioni], tsMorte: { ...stato.pg.tsMorte } };
+  const prima = { pf: { ...stato.pg.pf }, condizioni: [...stato.pg.condizioni], tsMorte: { ...stato.pg.tsMorte },
+    pe: stato.pg.pe, ispirazione: stato.pg.ispirazione, monete: { ...stato.pg.monete }, livello: stato.pg.livello };
+  let idOggetto = null;
   modifica((x) => {
     const v = Math.max(0, Number(az.valore) || 0);
     if (az.tipo === 'danno') applicaPF(x, -v);
@@ -473,6 +773,15 @@ function applicaAzione(m) {
       if (az.attiva && i < 0) x.condizioni.push(az.id);
       if (!az.attiva && i >= 0) x.condizioni.splice(i, 1);
     }
+    else if (az.tipo === 'pe') x.pe = (Number(x.pe) || 0) + v;
+    else if (az.tipo === 'ispirazione') x.ispirazione = true;
+    else if (az.tipo === 'monete') for (const c of R.MONETE) x.monete[c.id] = (Number(x.monete[c.id]) || 0) + Math.max(0, Number(az.monete?.[c.id]) || 0);
+    else if (az.tipo === 'oggetto' && az.oggetto?.nome) {
+      const o = az.oggetto;
+      idOggetto = nuovoId();
+      x.inventario.push({ id: idOggetto, nome: String(o.nome), qta: Math.max(1, Number(o.qta) || 1), peso: Math.max(0, Number(o.peso) || 0), descrizione: String(o.descrizione || ''),
+        tipo: 'oggetto', slot: '', equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' });
+    }
   });
   const testo = descriviAzione(az, m.da?.nome || 'Qualcuno', stato.pg.nome, prima.pf, stato.pg.pf);
   pubblicaStato({ annota: false });
@@ -481,8 +790,16 @@ function applicaAzione(m) {
     document.body.classList.remove('colpito'); void document.body.offsetWidth; document.body.classList.add('colpito');
     vibra([40, 30, 40]);
   } else vibra(20);
+  if (az.tipo === 'pe') {
+    const prossimo = R.SOGLIE_PE[stato.pg.livello];
+    if (prossimo != null && stato.pg.pe >= prossimo && (prima.pe || 0) < prossimo) setTimeout(() => avviso(`Hai abbastanza PE per salire al livello ${stato.pg.livello + 1}! Tocca "Sali di livello" nella scheda.`), 1500);
+  }
   avvisoConAzione(testo.replace(`${stato.pg.nome}: `, '').replace(` → ${stato.pg.nome}`, ''), 'Annulla', () => {
-    modifica((x) => { x.pf = { ...prima.pf }; x.condizioni = [...prima.condizioni]; x.tsMorte = { ...prima.tsMorte }; });
+    modifica((x) => {
+      x.pf = { ...prima.pf }; x.condizioni = [...prima.condizioni]; x.tsMorte = { ...prima.tsMorte };
+      x.pe = prima.pe; x.ispirazione = prima.ispirazione; x.monete = { ...prima.monete };
+      if (idOggetto) x.inventario = x.inventario.filter((o) => o.id !== idOggetto);
+    });
     pubblicaStato({ annota: false });
     aggiungiVoce(`${stato.pg.nome} annulla: ${testo}`, { tipo: 'annulla' });
   }, az.tipo === 'danno' ? 'danno' : '');
@@ -738,6 +1055,8 @@ function contenutoTavolo({ master }) {
     testaTavolo(tv),
     S.fase !== 'collegato' ? h('p.nota', S.fase === 'collegamento' ? 'Cerco il tavolo… se nessuno lo ha ancora aperto, questo telefono farà da centralino.' : 'Il collegamento si è interrotto: riprovo da solo. Tieni l\'app aperta.') : null,
     turno ? h('div.turno-banner', h('strong', `Round ${turno.round}`), ` · turno di ${turno.nome}`, turno.prossimo ? h('small', ` · poi ${turno.prossimo}`) : null) : null,
+    !S.io?.master && turno?.ordine?.length ? ordineCombattimento(turno) : null,
+    !S.io?.master ? sezioneDalMaster(tv) : null,
     h('h3.card-titolo', 'Compagni'),
     !S.io?.master ? h('p.nota', 'Tocca un compagno per curarlo o dargli PF temporanei: il suo telefono li riceve subito.') : null,
     h('div.compagni', elencoCompagni(tv).map((m) => schedaCompagno(m, {
@@ -750,6 +1069,30 @@ function contenutoTavolo({ master }) {
     h('div.riga-btn',
       h('button.btn', { onclick: () => rinominaTavolo(tv) }, 'Rinomina'),
       h('button.btn.pericolo', { onclick: () => esci() }, 'Esci dal tavolo')));
+}
+
+// Ordine dei turni, se il Master ha deciso di mostrarlo (i mostri nascosti non compaiono)
+function ordineCombattimento(turno) {
+  return h('div.ordine-turni',
+    h('h3.card-titolo', 'Ordine dei turni'),
+    turno.ordine.map((o) => h('div.ordine-riga' + (o.attuale ? '.attuale' : '') + (o.tipo === 'mostro' ? '.mostro' : '') + (o.pgId && o.pgId === mioPgId() ? '.mio' : ''),
+      h('span.ordine-nome', o.nome), o.stato ? h('small.ordine-stato', o.stato) : null)));
+}
+
+// Contenuti mostrati dal Master e messaggi con lui (lato giocatore)
+function sezioneDalMaster(tv) {
+  const vetrina = tv.vetrina || [];
+  const chat = (tv.chat || []).slice(-6);
+  const nuoviMsg = (tv.chat || []).filter((v) => !v.letto).length;
+  if (!vetrina.length && !chat.length && !tv.master) return null;
+  return h('div.dal-master',
+    h('h3.card-titolo', 'Dal Master', nuoviMsg ? h('span.badge', `${nuoviMsg} nuovi`) : null),
+    vetrina.length ? h('div.vetrina-lista', vetrina.map((c) => h('button.vetrina-voce' + (c.visto ? '' : '.nuova'), { onclick: () => apriContenuto(c, { dalMaster: true }) },
+      h('span.vetrina-icona', c.img ? '🖼' : '📜'), h('span.vetrina-titolo', c.titolo || 'Senza titolo'), c.visto ? null : h('span.badge', 'nuovo')))) : null,
+    chat.length ? h('div.chat-mini', chat.map((v) => h('div.chat-riga' + (v.da === 'master' ? '.dal-master' : '.mia') + (v.letto ? '' : '.non-letto'),
+      { onclick: () => segnaLetti((x) => x.id === v.id) },
+      h('small', v.da === 'master' ? (v.a === 'tutti' ? 'Master, a tutti' : 'Master, solo a te') : 'Tu', ' · ', ora(v.t)), h('span', v.testo)))) : null,
+    tv.master ? h('button.btn', { onclick: rispondiAlMaster }, '✉ Scrivi al Master') : null);
 }
 
 export async function rinominaTavolo(tv) {
@@ -860,6 +1203,11 @@ export function renderStrisciaCompagni(c) {
     return h('div.card.striscia-compagni', { onclick: () => apriTavolo() },
       h('h3.card-titolo', ico('tavolo'), h('span.striscia-titolo', tv.nome), h('span.striscia-fase', { 'data-fase': S.fase }, TESTO_FASE[S.fase])),
       turno ? h('div.turno-banner' + (turno.pgId === mioPgId() ? '.mio' : ''), h('strong', `Round ${turno.round}`), turno.pgId === mioPgId() ? ' · tocca a te!' : ` · turno di ${turno.nome}`, turno.prossimo ? h('small', ` · poi ${turno.prossimo}`) : null) : null,
+      (() => {
+        const msg = (tv.chat || []).filter((v) => !v.letto).length;
+        const cose = (tv.vetrina || []).filter((c) => !c.visto).length;
+        return msg || cose ? h('div.avviso-master', [msg ? `✉ ${msg} ${msg === 1 ? 'messaggio' : 'messaggi'} dal Master` : null, cose ? `📜 ${cose} ${cose === 1 ? 'cosa nuova' : 'cose nuove'} da vedere` : null].filter(Boolean).join(' · ')) : null;
+      })(),
       altri.length ? altri.map((m) => {
         const col = coloreBarra(m);
         return h('div.striscia-riga' + (S.presenti.has(m.id) ? '' : '.assente'),

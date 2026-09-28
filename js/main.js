@@ -13,7 +13,7 @@ import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, p
 import * as T from './tavolo.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.7.0';
+export const VERSIONE_APP = '1.8.0';
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
 const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
