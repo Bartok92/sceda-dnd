@@ -10,8 +10,10 @@ import { apriTiraDadi } from './dadi.js';
 import { esportaBackup, importaBackup } from './backup.js';
 import { ico, sigillo } from './icone.js';
 import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, pulsanteTema, nomeTema } from './temi.js';
+import * as T from './tavolo.js';
+import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.3.0';
+export const VERSIONE_APP = '1.5.0';
 
 const TABS = [
   { id: 'eroe', nome: 'Eroe', icona: 'eroe' },
@@ -30,7 +32,7 @@ function braci(n = 16) {
   }));
 }
 const RENDER = {
-  eroe: (c) => { S.renderIntestazione(c); S.renderVita(c); S.renderCondizioni(c); },
+  eroe: (c) => { S.renderIntestazione(c); S.renderVita(c); T.renderStrisciaCompagni(c); S.renderCondizioni(c); },
   combatti: S.renderCombattimento,
   car: S.renderCaratteristiche,
   magie: S.renderMagie,
@@ -53,6 +55,7 @@ let modelli = null; // modulo modelli.js (3D), caricato alla prima apertura dell
 
 async function mostraElenco() {
   await salvaOra();
+  T.sospendi();
   stato.pg = null;
   document.body.dataset.vita = '';
   document.body.dataset.schermata = 'elenco';
@@ -83,6 +86,7 @@ async function mostraElenco() {
       h('button.btn-icona', { 'aria-label': 'Opzioni', onclick: () => menuPersonaggio(p) }, '⋮')))) :
       h('div.card.vuota', h('p', 'Nessun personaggio ancora.'), h('p.nota', 'Crea il tuo primo eroe con la procedura guidata.')),
     h('button.btn.grande.primario', { onclick: nuovoPersonaggio }, ico('piu'), 'Nuovo personaggio'),
+    h('button.btn.grande.master-btn', { onclick: apriMaster }, ico('tavolo'), 'Modalità Master'),
     h('div.riga-btn',
       h('button.btn', { onclick: () => esportaBackup().catch((e) => avviso(e.message, 'errore')) }, ico('salva'), 'Backup completo'),
       h('button.btn', { onclick: ripristina }, ico('libro'), 'Ripristina')),
@@ -116,6 +120,17 @@ async function pulisciFileOrfani() {
   const usati = new Set();
   tutti.forEach((p) => { p.modelli?.forEach((m) => usati.add(m.fileId)); p.inventario?.forEach((o) => o.modello && usati.add(o.modello)); });
   for (const f of await db.elencoFile()) if (!usati.has(f.id)) await db.elimina('file', f.id);
+}
+
+// Modalità Master: il DM usa l'app senza personaggio (vede il gruppo, manda danni e condizioni, gestisce i turni)
+async function apriMaster() {
+  await salvaOra();
+  stato.pg = null;
+  document.body.dataset.vita = '';
+  await db.salvaImpostazione('ultimo', '__master__');
+  applicaTema(temaGlobale());
+  armaIndietro();
+  mostraMaster(app, { indietro: mostraElenco });
 }
 
 function nuovoPersonaggio() {
@@ -181,7 +196,7 @@ async function apriImpostazioni() {
       } }, '⟳ Controlla aggiornamenti'),
       h('div.crediti',
         h('p', `Scheda D&D versione ${VERSIONE_APP}. Funziona senza internet: tutti i dati restano sul tuo telefono.`),
-        h('p', 'Caratteri: Cinzel, Cinzel Decorative e Alegreya (SIL Open Font License). Grafica 3D: three.js (licenza MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
+        h('p', 'Caratteri: Cinzel, Cinzel Decorative e Alegreya (SIL Open Font License). Grafica 3D: three.js (licenza MIT). Tavolo di gioco: PeerJS (MIT), jsQR (Apache 2.0), qrcode-generator (MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
         h('p', 'Regole e incantesimi dal System Reference Document 5.1 di Wizards of the Coast (CC-BY-4.0).')));
   });
 }
@@ -217,6 +232,7 @@ async function apriPersonaggio(id) {
     strutturaScheda.stato3d.replaceChildren(h('p', 'Il 3D non è disponibile su questo dispositivo: ' + e.message));
   }
   aggiornaOverlay3D();
+  T.alPersonaggio(stato.pg).catch(console.error);
 }
 
 function costruisciScheda() {
@@ -237,6 +253,7 @@ function costruisciScheda() {
     h('header.barra-top',
       h('button.btn-icona', { 'aria-label': 'Personaggi', onclick: mostraElenco }, ico('personaggi')),
       titolo,
+      T.pulsanteTavolo(),
       h('button.btn-icona', { 'aria-label': 'Menu', onclick: menuScheda }, ico('altro'))),
     braci(18), scorrevole, barra,
     h('button.fab-dadi', { 'aria-label': 'Tira i dadi', onclick: apriTiraDadi }, ico('dado'))));
@@ -258,6 +275,7 @@ function menuScheda() {
   pannello(p.nome, (c, chiudi) => {
     c.append(h('div.lista-scelte',
       h('button.btn.grande', { onclick: () => { chiudi(); apriSceltaTema({ pg: p, salvaPg: (t) => salvaTemaPg(t) }); } }, ico('tavolozza'), `Tema grafico: ${nomeTema(temaPer(p))}${p.tema ? ' (solo suo)' : ''}`),
+      h('button.btn.grande', { onclick: () => { chiudi(); T.apriTavolo(); } }, ico('tavolo'), 'Tavolo di gioco (compagni)'),
       h('button.btn.grande', { onclick: () => { chiudi(); S.apriModificaBase(); } }, ico('note'), 'Modifica i dati del personaggio'),
       h('button.btn.grande', { onclick: () => { chiudi(); esportaBackup([p.id]).catch((e) => avviso(e.message, 'errore')); } }, ico('salva'), 'Backup di questo personaggio'),
       h('button.btn.grande', { onclick: () => { chiudi(); mostraElenco(); } }, ico('personaggi'), 'Torna ai personaggi')));
@@ -275,8 +293,8 @@ document.addEventListener('tema-cambiato', async (e) => {
 });
 // Tasto Indietro: dalla scheda o dalla creazione si torna all'elenco
 impostaIndietro(
-  () => { if (['scheda', 'wizard'].includes(document.body.dataset.schermata)) { mostraElenco(); return true; } return false; },
-  () => ['scheda', 'wizard'].includes(document.body.dataset.schermata));
+  () => { if (['scheda', 'wizard', 'master'].includes(document.body.dataset.schermata)) { mostraElenco(); return true; } return false; },
+  () => ['scheda', 'wizard', 'master'].includes(document.body.dataset.schermata));
 
 function evidenziaTab() {
   strutturaScheda.barra.querySelectorAll('button').forEach((b) => b.classList.toggle('attivo', b.dataset.tab === stato.tab));
@@ -381,7 +399,8 @@ async function avvio() {
   try {
     await caricaTemaGlobale();
     const ultimo = await db.impostazione('ultimo');
-    if (ultimo && (await db.leggi('personaggi', ultimo))) await apriPersonaggio(ultimo);
+    if (ultimo === '__master__') await apriMaster();
+    else if (ultimo && (await db.leggi('personaggi', ultimo))) await apriPersonaggio(ultimo);
     else await mostraElenco();
   } catch (e) {
     console.error(e);

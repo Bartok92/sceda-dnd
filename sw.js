@@ -1,16 +1,16 @@
 // Service worker: rende l'app utilizzabile senza internet dopo la prima apertura.
 // Quando pubblichi una nuova versione, aumenta il numero qui sotto.
-const VERSIONE = 'scheda-dnd-v1.3.0';
+const VERSIONE = 'scheda-dnd-v1.5.0';
 
 const FILE_APP = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/ui.js', 'js/db.js', 'js/stato.js', 'js/regole.js', 'js/scheda.js', 'js/zaino.js',
-  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js',
+  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js', 'js/tavolo.js', 'js/master.js',
   'fonts/cinzel-latin-500-normal.woff2', 'fonts/cinzel-latin-700-normal.woff2', 'fonts/cinzel-latin-900-normal.woff2',
   'fonts/cinzel-decorative-latin-700-normal.woff2', 'fonts/cinzel-decorative-latin-900-normal.woff2',
   'fonts/alegreya-latin-400-normal.woff2', 'fonts/alegreya-latin-400-italic.woff2', 'fonts/alegreya-latin-500-normal.woff2',
   'fonts/alegreya-latin-700-normal.woff2', 'fonts/alegreya-sc-latin-500-normal.woff2',
-  'vendor/three-bundle.js', 'vendor/draco/draco_wasm_wrapper.js', 'vendor/draco/draco_decoder.wasm',
+  'vendor/three-bundle.js', 'vendor/rete-bundle.js', 'vendor/draco/draco_wasm_wrapper.js', 'vendor/draco/draco_decoder.wasm',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png',
   'esempi/eroe.glb', 'esempi/eroe-armatura-oro.glb', 'esempi/spada.glb', 'esempi/scudo.glb',
   'esempi/elmo.glb', 'esempi/amuleto.glb', 'esempi/faretra.glb', 'esempi/borsa.glb',

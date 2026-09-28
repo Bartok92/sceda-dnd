@@ -39,6 +39,7 @@ const P = {
   tavolozza: '<path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.3 0 1.9-.8 1.9-1.7 0-1.3-1-1.6-1-2.8 0-1 .8-1.7 1.9-1.7h2.2a4 4 0 0 0 4-4C21 6.6 17 3.2 12 3.2z"/><circle cx="7.6" cy="11.4" r="1.2"/><circle cx="10.2" cy="7.4" r="1.2"/><circle cx="15" cy="7.6" r="1.2"/>',
   installa: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M12 7v7M9 11.4l3 3 3-3M10.4 18.4h3.2"/>',
   altro: '<circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/>',
+  tavolo: '<ellipse cx="12" cy="15.2" rx="7" ry="3"/><path d="M8.6 18v2.6M15.4 18v2.6"/><circle cx="12" cy="6.4" r="2.2"/><circle cx="4.6" cy="9.6" r="1.8"/><circle cx="19.4" cy="9.6" r="1.8"/>',
   figura: '<circle cx="12" cy="5.6" r="2.6"/><path d="M8 21l1.2-7.4-2.6-1.2L8 8.8h8l1.4 3.6-2.6 1.2L16 21"/>',
 };
 

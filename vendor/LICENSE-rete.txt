@@ -1,0 +1,5 @@
+vendor/rete-bundle.js contiene:
+- PeerJS 1.5.5 (https://peerjs.com) - licenza MIT
+- jsQR 1.4.0 (https://github.com/cozmo/jsQR) - licenza Apache 2.0
+- qrcode-generator 1.4.4 (https://github.com/kazuhikoarase/qrcode-generator) - licenza MIT
+Generato con esbuild (entry.js --bundle --format=esm --minify), vedi strumenti/bundle-rete.
