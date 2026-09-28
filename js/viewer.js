@@ -16,21 +16,23 @@ export const PREDEFINITI_SLOT = {
 };
 
 export const QUALITA = {
-  massima: { tex: 4096, pr: 3, ombre: true },   // piena risoluzione Retina (iPhone Pro / Pro Max)
-  alta: { tex: 4096, pr: 2, ombre: true },
-  bilanciata: { tex: 2048, pr: 1.75, ombre: true },
-  risparmio: { tex: 1024, pr: 1, ombre: false },
+  massima: { tex: 4096, pr: 3, ombre: true, bagliore: true },   // piena risoluzione Retina (iPhone Pro / Pro Max)
+  alta: { tex: 4096, pr: 2, ombre: true, bagliore: true },
+  bilanciata: { tex: 2048, pr: 1.75, ombre: true, bagliore: true },
+  risparmio: { tex: 1024, pr: 1, ombre: false, bagliore: false },
 };
 
 let renderer, scena, camera, controlli, orologio, contenitore, gruppoPersonaggio, marcatore, runeAnello, braci, torcia;
 let luceContorno, luceRossa, matPietra, matOro; // riferimenti usati dai temi
 let temaScena = 'grimorio';
 let torciaBase = 3.2;
+let compositore = null, passoBagliore = null;
+const materialiPulsanti = new Set(); // materiali che emettono luce (crepe, rune, occhi): pulsano piano
 
 // Colori della scena per ogni tema grafico
 const TEMI_3D = {
-  grimorio: { nebbia: 0x120709, contorno: [0x7090ff, 1.6], rossa: [0xff3030, 0.8], torcia: [0xff8a2a, 3.2], oro: [0xd9a94e, 0x000000, 0], rune: [0xffffff, 0.55], pietra: [0x3a302c, 0x000000, 0], braci: 0.05 },
-  lava: { nebbia: 0x080202, contorno: [0xff4a1a, 2.4], rossa: [0xff2208, 1.9], torcia: [0xff5a1a, 4.2], oro: [0xff6a1f, 0xff3000, 1.4], rune: [0xff6a2a, 0.9], pietra: [0x1a1312, 0x2a0400, 0.6], braci: 0.075 },
+  grimorio: { nebbia: 0x120709, contorno: [0x7090ff, 1.6], rossa: [0xff2a20, 1.2], torcia: [0xff8a2a, 2.8], oro: [0xd9a94e, 0x000000, 0], rune: [0xffffff, 0.55], pietra: [0x3a302c, 0x000000, 0], braci: 0.05, bagliore: 0.5 },
+  lava: { nebbia: 0x080202, contorno: [0xff4a1a, 2.4], rossa: [0xff2208, 1.9], torcia: [0xff5a1a, 4.2], oro: [0xff6a1f, 0xff3000, 1.4], rune: [0xff6a2a, 0.9], pietra: [0x1a1312, 0x2a0400, 0.6], braci: 0.075, bagliore: 0.7 },
 };
 export function impostaTema(id) {
   temaScena = TEMI_3D[id] ? id : 'grimorio';
@@ -44,6 +46,7 @@ export function impostaTema(id) {
   matPietra.color.setHex(t.pietra[0]); matPietra.emissive.setHex(t.pietra[1]); matPietra.emissiveIntensity = t.pietra[2];
   runeAnello.material.color.setHex(t.rune[0]); runeAnello.material.opacity = t.rune[1];
   braci.material.size = t.braci;
+  if (passoBagliore) passoBagliore.strength = t.bagliore;
 }
 let qualita = QUALITA.bilanciata;
 let visibile = false, inPausa = false, animPausa = false;
@@ -63,6 +66,7 @@ export function impostaQualita(nome) {
   if (renderer) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualita.pr));
     renderer.shadowMap.enabled = qualita.ombre;
+    compositore?.setPixelRatio(renderer.getPixelRatio());
     scena?.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
     ridimensiona();
   }
@@ -108,6 +112,15 @@ function creaRenderer() {
   camera.position.set(0, 1.3, 4.2);
   orologio = new THREE.Clock();
 
+  // Post-produzione: il "bagliore" (bloom) fa irradiare luce a crepe di lava, rune e occhi.
+  // Lo sfondo resta trasparente, così si vede quello del tema.
+  const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+  compositore = new THREE.EffectComposer(renderer, rt);
+  compositore.addPass(new THREE.RenderPass(scena, camera));
+  passoBagliore = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.5, 0.92);
+  compositore.addPass(passoBagliore);
+  compositore.addPass(new THREE.OutputPass());
+
   creaAmbiente();
   creaLuci();
   creaPiedistallo();
@@ -142,7 +155,7 @@ function creaRenderer() {
 }
 
 function creaAmbiente() {
-  // Riflessi calde da "sala di pietra illuminata dalle torce" per i materiali metallici
+  // Riflessi da "sala di pietra": toni neutri e scuri, un pannello caldo, uno freddo e uno rosso
   const pm = new THREE.PMREMGenerator(renderer);
   const env = new THREE.Scene();
   const geo = new THREE.SphereGeometry(10, 32, 16);
@@ -151,25 +164,26 @@ function creaAmbiente() {
   const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i) / 10;
-    if (y > 0.5) c.setRGB(0.25, 0.2, 0.22);
-    else if (y > 0) c.setRGB(0.9 - y, 0.55 - y * 0.6, 0.3 - y * 0.3);
-    else c.setRGB(0.25 + y * 0.2, 0.06, 0.05);
+    if (y > 0.5) c.setRGB(0.16, 0.16, 0.19);
+    else if (y > 0) c.setRGB(0.5 - y * 0.6, 0.46 - y * 0.56, 0.45 - y * 0.5);
+    else c.setRGB(0.2 + y * 0.12, 0.05, 0.05);
     col.push(c.r, c.g, c.b);
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   env.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
   const pannello = (x, y, z, colore, s) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(s, s), new THREE.MeshBasicMaterial({ color: colore, side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m); };
-  pannello(4, 4, 5, 0xffe2b0, 5);
+  pannello(4, 4, 5, 0xfff0dc, 5);
   pannello(-6, 2, -3, 0x6a7cff, 3);
+  pannello(5, 1.5, -5, 0xff2a1a, 3.5);
   pannello(-3, 5, 4, 0xffffff, 2.5);
   scena.environment = pm.fromScene(env, 0.04).texture;
-  scena.environmentIntensity = 0.8;
+  scena.environmentIntensity = 0.85;
   pm.dispose();
 }
 
 function creaLuci() {
-  scena.add(new THREE.HemisphereLight(0xffe2c0, 0x2a0c0c, 0.7));
-  const chiave = new THREE.DirectionalLight(0xffd6a0, 2.4);
+  scena.add(new THREE.HemisphereLight(0xe2e4ec, 0x2a0c0c, 0.6));
+  const chiave = new THREE.DirectionalLight(0xfff0e0, 2.3);
   chiave.position.set(2.2, 4.2, 3);
   chiave.castShadow = true;
   chiave.shadow.mapSize.set(1024, 1024);
@@ -181,7 +195,7 @@ function creaLuci() {
   contorno.position.set(-3, 2.5, -3.5);
   scena.add(contorno);
   const rosso = luceRossa = new THREE.DirectionalLight(0xff3030, 0.8);
-  rosso.position.set(3, 1, -3);
+  rosso.position.set(2.8, 1.6, -3);
   scena.add(rosso);
   torcia = new THREE.PointLight(0xff8a2a, 3.5, 6, 1.6);
   torcia.position.set(-1.1, 0.6, 1.2);
@@ -244,8 +258,20 @@ function ridimensiona() {
   const w = contenitore.clientWidth, hh = contenitore.clientHeight;
   if (!w || !hh) return;
   renderer.setSize(w, hh, false);
+  compositore.setPixelRatio(renderer.getPixelRatio());
+  compositore.setSize(w, hh);
   camera.aspect = w / hh;
   camera.updateProjectionMatrix();
+}
+
+// Registra i materiali che emettono luce (per la pulsazione)
+function registraEmissivi(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+      if (m?.emissiveMap && !materialiPulsanti.has(m)) { m.userData.emissioneBase = m.emissiveIntensity; materialiPulsanti.add(m); }
+    });
+  });
 }
 
 let cicloAttivo = false;
@@ -261,6 +287,10 @@ function fotogramma() {
   if (mod?.mixer && !animPausa) mod.mixer.update(dt);
   if (runeAnello) runeAnello.rotation.z += dt * 0.08;
   if (torcia) torcia.intensity = torciaBase + Math.sin(t * 9) * 0.35 + Math.sin(t * 23.7) * 0.25;
+  if (materialiPulsanti.size) {
+    const battito = 0.86 + 0.1 * Math.sin(t * 1.7) + 0.05 * Math.sin(t * 3.3 + 1.2);
+    materialiPulsanti.forEach((m) => (m.emissiveIntensity = m.userData.emissioneBase * battito));
+  }
   if (braci) {
     const p = braci.geometry.getAttribute('position'); const v = braci.geometry.userData.vel;
     for (let i = 0; i < v.length; i++) {
@@ -275,15 +305,19 @@ function fotogramma() {
     if (camera.position.distanceTo(obiettivoCamera.pos) < 0.005) obiettivoCamera = null;
   }
   controlli.update();
-  renderer.render(scena, camera);
+  if (qualita.bagliore) compositore.render(dt); else renderer.render(scena, camera);
 }
 
 export function ricentra() {
   const fovV = THREE.MathUtils.degToRad(camera.fov);
   const fovH = 2 * Math.atan(Math.tan(fovV / 2) * camera.aspect);
-  const altezza = ALTEZZA + 0.75, larghezza = 2.2;
-  const d = Math.max((altezza / 2) / Math.tan(fovV / 2), (larghezza / 2) / Math.tan(fovH / 2)) * 1.08;
-  obiettivoCamera = { target: new THREE.Vector3(0, 0.8, 0), pos: new THREE.Vector3(0, 1.15, d) };
+  // Inquadra personaggio + oggetti impugnati (un'ascia grande può sporgere molto) + piedistallo
+  const box = new THREE.Box3(new THREE.Vector3(-1.0, -0.25, -0.9), new THREE.Vector3(1.0, ALTEZZA, 0.9));
+  if (mod) { gruppoPersonaggio.updateMatrixWorld(true); box.union(new THREE.Box3().setFromObject(gruppoPersonaggio)); }
+  const centro = box.getCenter(new THREE.Vector3()), dim = box.getSize(new THREE.Vector3());
+  const altezza = dim.y + 0.45, larghezza = dim.x + 0.2;
+  const d = Math.max((altezza / 2) / Math.tan(fovV / 2), (larghezza / 2) / Math.tan(fovH / 2)) * 1.06 + dim.z * 0.3;
+  obiettivoCamera = { target: new THREE.Vector3(centro.x, centro.y - 0.05, 0), pos: new THREE.Vector3(centro.x, centro.y + 0.3, d) };
 }
 
 export function focalizza(oggetto3d, distanza = 0.9) {
@@ -366,13 +400,14 @@ function prepara(root) {
       mats.forEach((m) => { if (m && 'envMapIntensity' in m) m.envMapIntensity = 1; });
     }
   });
+  registraEmissivi(root);
 }
 
 function libera(root) {
   root.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
-    mats.forEach((m) => { Object.values(m).forEach((t) => t?.isTexture && t.dispose()); m.dispose(); });
+    mats.forEach((m) => { materialiPulsanti.delete(m); Object.values(m).forEach((t) => t?.isTexture && t.dispose()); m.dispose(); });
   });
 }
 
@@ -489,6 +524,7 @@ export function dimenticaOggetto(fileId) { cacheOggetti.delete(fileId); }
 export async function sincronizzaOggetti(oggetti) {
   if (!mod) return;
   const corrente = mod;
+  let nuovi = false;
   const voluti = new Map(oggetti.filter((o) => o.modello && mod.mappa[o.slot] && mod.ossa.has(mod.mappa[o.slot])).map((o) => [o.id, o]));
   // Rimuovi ciò che non serve più
   for (const [id, a] of attaccati) {
@@ -517,7 +553,9 @@ export async function sincronizzaOggetti(oggetti) {
     osso.add(holder);
     attaccati.set(o.id, { holder, inner, fileId: o.modello, slot: o.slot, osso: nomeOsso });
     applicaRegolazione(o.id, o.regolazione);
+    nuovi = true;
   }
+  if (nuovi) ricentra();
 }
 
 export function regolazionePredefinita(slot) {
