@@ -22,6 +22,7 @@ import * as R from './regole.js';
 import { ico, sigillo } from './icone.js';
 import { applicaPF, riposoBreve, riposoLungo } from './scheda.js';
 import { tira } from './dadi.js';
+import * as E from './effetti.js';
 
 const PREFISSO = 'schedadnd-tavolo-';
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -88,6 +89,7 @@ function istantanea(pg) {
     pf: { att: pg.pf.att, max: pg.pf.max, temp: pg.pf.temp || 0 }, ca: R.classeArmatura(pg),
     condizioni: [...(pg.condizioni || [])], sfinimento: Number(pg.sfinimento) || 0, tsMorte: { ...(pg.tsMorte || { succ: 0, fall: 0 }) },
     percezione: R.percezionePassiva(pg), iniziativa: R.iniziativa(pg), velocita: R.velocitaEffettiva(pg).valore,
+    effetti: (pg.effetti || []).map((e) => e.nome), concentrazione: pg.concentrazione?.nome || null,
     t: Date.now(),
   };
 }
@@ -408,6 +410,18 @@ function perMe(m) {
   else if (m.tipo === 'vetrina') { if (!S.io.master) riceviVetrina(m); }
   else if (m.tipo === 'chiediImg') { if (S.io.master) inviaImmagine(m); }
   else if (m.tipo === 'pezzo') { if (!S.io.master) riceviPezzo(m); }
+  else if (m.tipo === 'effettoTerminato') effettoTerminatoDaBersaglio(m);
+}
+
+// Un compagno ha tolto un mio effetto a concentrazione: lo tolgo dall'elenco (se non resta nessuno, la concentrazione finisce)
+function effettoTerminatoDaBersaglio(m) {
+  if (!stato.pg?.concentrazione || stato.pg.id !== mioPgId()) return;
+  modifica((x) => {
+    if (!x.concentrazione) return;
+    x.concentrazione.bersagli = x.concentrazione.bersagli.filter((b) => b.effettoId !== m.effettoId);
+    if (!x.concentrazione.bersagli.length) x.concentrazione = null;
+  });
+  avviso(`${m.da?.nome || 'Un compagno'} ha terminato ${m.nome || 'il tuo effetto'}`);
 }
 
 // Messaggio diretto a un partecipante (passa dal centralino; se sono io il centralino lo consegno io)
@@ -601,7 +615,9 @@ function chiestoTiro(m) {
         t.mostraCd && t.cd ? ` · CD ${t.cd}` : '', modo !== 'normale' ? ` · con ${modo}` : ''),
       t.nota ? h('p.nota', t.nota) : null,
       h('button.btn.grande.primario', { onclick: () => {
-        const r = tira(espr, etichetta, { d20, modoTiro: modo });
+        // I dadi degli effetti attivi (es. Benedizione sui TS, Guida sulle prove) si aggiungono da soli
+        const ambito = t.tipo === 'ts' ? 'ts' : t.tipo === 'abilita' || t.tipo === 'caratteristica' ? 'prova' : null;
+        const r = ambito ? E.tiraCon(espr, etichetta, ambito, { d20, modoTiro: modo }) : tira(espr, etichetta, { d20, modoTiro: modo });
         if (r) { chiudi(); rispondi(r.totale, r.naturale); }
       } }, `🎲 Tira ora (${espr.replace('1d20', 'd20')}${modo !== 'normale' ? ', ' + modo : ''})`),
       h('p.nota.centrato', 'oppure, se tiri con il dado vero, scrivi il risultato totale'),
@@ -747,6 +763,11 @@ function descriviAzione(az, da, chi, prima, dopo) {
   if (az.tipo === 'ispirazione') return `${da} dà l'ispirazione eroica a ${chi}${motivo}`;
   if (az.tipo === 'oggetto') return `${da} dà a ${chi}: ${az.oggetto?.nome || 'un oggetto'}${(az.oggetto?.qta || 1) > 1 ? ' ×' + az.oggetto.qta : ''}${motivo}`;
   if (az.tipo === 'monete') return `${da} dà a ${chi} ${testoMonete(az.monete)}${motivo}`;
+  if (az.tipo === 'effetto') { const s = E.sommario(az.effetto || {}); return `${da} lancia ${az.effetto?.nome || 'un effetto'} su ${chi}${s ? ' (' + s + ')' : ''}`; }
+  if (az.tipo === 'fineEffetto') return `${az.nome || 'Un effetto'} su ${chi} è finito${motivo}`;
+  if (az.tipo === 'rimuoviCondizione') return `${da} toglie a ${chi}: ${[...(az.condizioni || []).map(nomeCondizione), az.sfinimento ? '1 livello di Sfinimento' : null].filter(Boolean).join(', ')}${motivo}`;
+  if (az.tipo === 'stabilizza') return `${da} stabilizza ${chi}${motivo}`;
+  if (az.tipo === 'revivifica') return `${da} riporta in vita ${chi}!${motivo}`;
   return `${da} → ${chi}`;
 }
 export const testoMonete = (m = {}) => R.MONETE.filter((c) => Number(m[c.id]) > 0).map((c) => `${m[c.id]} ${c.sigla || c.id}`).join(', ') || 'nessuna moneta';
@@ -761,7 +782,8 @@ function applicaAzione(m) {
   chiudiPFInSospeso();
   const az = m.azione || {};
   const prima = { pf: { ...stato.pg.pf }, condizioni: [...stato.pg.condizioni], tsMorte: { ...stato.pg.tsMorte },
-    pe: stato.pg.pe, ispirazione: stato.pg.ispirazione, monete: { ...stato.pg.monete }, livello: stato.pg.livello };
+    pe: stato.pg.pe, ispirazione: stato.pg.ispirazione, monete: { ...stato.pg.monete }, livello: stato.pg.livello,
+    effetti: structuredClone(stato.pg.effetti || []), sfinimento: stato.pg.sfinimento };
   let idOggetto = null;
   modifica((x) => {
     const v = Math.max(0, Number(az.valore) || 0);
@@ -782,10 +804,20 @@ function applicaAzione(m) {
       x.inventario.push({ id: idOggetto, nome: String(o.nome), qta: Math.max(1, Number(o.qta) || 1), peso: Math.max(0, Number(o.peso) || 0), descrizione: String(o.descrizione || ''),
         tipo: 'oggetto', slot: '', equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' });
     }
+    else if (az.tipo === 'effetto' && az.effetto?.nome) E.aggiungiEffetto(x, az.effetto);
+    else if (az.tipo === 'fineEffetto') E.togliEffetto(x, az.effettoId);
+    else if (az.tipo === 'rimuoviCondizione') {
+      x.condizioni = x.condizioni.filter((c) => !(az.condizioni || []).includes(c));
+      if (az.sfinimento && x.sfinimento > 0) x.sfinimento--;
+    }
+    else if (az.tipo === 'stabilizza') { if (x.pf.att <= 0) x.tsMorte = { succ: 3, fall: x.tsMorte?.fall || 0 }; }
+    else if (az.tipo === 'revivifica') { if (x.pf.att <= 0) { x.pf.att = 1; x.tsMorte = { succ: 0, fall: 0 }; } }
   });
   const testo = descriviAzione(az, m.da?.nome || 'Qualcuno', stato.pg.nome, prima.pf, stato.pg.pf);
   pubblicaStato({ annota: false });
-  aggiungiVoce(testo, { tipo: az.tipo === 'condizione' ? 'condizione' : az.tipo === 'danno' ? 'danno' : 'pf' });
+  aggiungiVoce(testo, { tipo: az.tipo === 'condizione' ? 'condizione' : az.tipo === 'danno' ? 'danno' : az.tipo === 'effetto' || az.tipo === 'fineEffetto' ? 'livello' : 'pf' });
+  if (az.tipo === 'fineEffetto') { avviso(testo); return; }   // la fine di un effetto non si annulla
+  if (az.tipo === 'danno') E.controllaConcentrazione(Math.max(0, Number(az.valore) || 0));
   if (az.tipo === 'danno') {
     document.body.classList.remove('colpito'); void document.body.offsetWidth; document.body.classList.add('colpito');
     vibra([40, 30, 40]);
@@ -798,6 +830,7 @@ function applicaAzione(m) {
     modifica((x) => {
       x.pf = { ...prima.pf }; x.condizioni = [...prima.condizioni]; x.tsMorte = { ...prima.tsMorte };
       x.pe = prima.pe; x.ispirazione = prima.ispirazione; x.monete = { ...prima.monete };
+      x.effetti = structuredClone(prima.effetti); x.sfinimento = prima.sfinimento;
       if (idOggetto) x.inventario = x.inventario.filter((o) => o.id !== idOggetto);
     });
     pubblicaStato({ annota: false });
@@ -987,6 +1020,8 @@ export function schedaCompagno(m, { presente: pres, io, extra = null, onclick = 
       h('div.barra.comp-barra', h('div.barra-riemp' + (col ? '.' + col : ''), { style: { width: perc + '%' } }),
         m.pf.temp > 0 ? h('div.barra-temp', { style: { width: Math.min(100, (m.pf.temp / (m.pf.max || 1)) * 100) + '%' } }) : null),
       cond.length ? h('div.comp-cond', cond.map((c) => h('span.comp-chip', c))) : null,
+      m.effetti?.length || m.concentrazione ? h('div.comp-cond', (m.effetti || []).map((e) => h('span.comp-chip.effetto', '✦ ' + e)),
+        m.concentrazione ? h('span.comp-chip.conc', '◎ ' + m.concentrazione) : null) : null,
       m.pf.att <= 0 && (m.tsMorte?.succ || m.tsMorte?.fall) ? h('small.comp-morte', `TS morte: ✔${m.tsMorte.succ} ✖${m.tsMorte.fall}`) : null,
       extra,
       !pres && m.t ? h('small.comp-visto', `Non collegato · ultimo aggiornamento ${serataDi(m.t) === serataDi(Date.now()) ? 'stasera alle ' + ora(m.t) : 'il ' + new Date(m.t).toLocaleDateString('it-IT')}`) : null),

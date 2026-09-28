@@ -1323,3 +1323,24 @@ button.stat-box:active { transform: scale(.96); }
 .opzioni-ini > strong { font: 700 .95rem var(--font-titoli); color: var(--oro-chiaro); }
 .opzioni-ini > small { color: var(--testo-2); font-size: .8rem; }
 .ini-riga.nascosto { border-style: dashed; }
+
+/* ═══════════════════ 1.9: effetti su se stessi e sui compagni ═══════════════════ */
+.effetti { display: flex; flex-direction: column; gap: 8px; }
+.concentrazione { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--accento); background: rgba(var(--oro-rgb), .12); box-shadow: 0 0 14px rgba(var(--oro-rgb), .25); }
+.conc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.conc-info strong { font: 700 1rem var(--font-titoli); color: var(--accento); }
+.conc-info small { color: var(--testo-2); font-size: .82rem; }
+.effetto { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--linea-forte); background: var(--riquadro-bg); }
+.eff-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.eff-info strong { font: 700 1.02rem var(--font-titoli); color: var(--testo); }
+.eff-info small { color: var(--testo-2); font-size: .8rem; }
+.eff-mod { display: inline-block; align-self: flex-start; margin-top: 3px; padding: 2px 9px; border-radius: 99px; font-size: .84rem; font-weight: 700; color: #fff4e0; background: linear-gradient(135deg, #6b3cc9, #2f6fd0); }
+.eff-nota { font-style: italic; }
+.eff-azioni { flex: none; display: flex; flex-direction: column; gap: 5px; }
+.aiuti-gruppo .privilegio { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--linea); }
+.aiuti-gruppo .priv-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.aiuti-gruppo .priv-info small { color: var(--testo-2); font-size: .82rem; }
+.lancia-su { display: flex; flex-direction: column; gap: 10px; }
+.lancia-su .chip small { opacity: .75; }
+.comp-chip.effetto { background: linear-gradient(135deg, #6b3cc9, #2f6fd0); }
+.comp-chip.conc { background: var(--oro-scuro, #9a7028); }

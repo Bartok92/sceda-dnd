@@ -1,11 +1,11 @@
 // Service worker: rende l'app utilizzabile senza internet dopo la prima apertura.
 // Quando pubblichi una nuova versione, aumenta il numero qui sotto.
-const VERSIONE = 'scheda-dnd-v1.8.0';
+const VERSIONE = 'scheda-dnd-v1.9.0';
 
 const FILE_APP = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/ui.js', 'js/db.js', 'js/stato.js', 'js/regole.js', 'js/scheda.js', 'js/zaino.js',
-  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js', 'js/tavolo.js', 'js/master.js', 'js/iphone.js', 'css/iphone.css',
+  'js/wizard.js', 'js/dadi.js', 'js/backup.js', 'js/modelli.js', 'js/viewer.js', 'js/incantesimi-base.js', 'js/dati2024.js', 'js/icone.js', 'js/temi.js', 'js/tavolo.js', 'js/master.js', 'js/effetti.js', 'js/iphone.js', 'css/iphone.css',
   'iphone/', 'iphone/index.html', 'iphone/manifest.webmanifest', 'iphone/avvio-1320x2868.png',
   'fonts/cinzel-latin-500-normal.woff2', 'fonts/cinzel-latin-700-normal.woff2', 'fonts/cinzel-latin-900-normal.woff2',
   'fonts/cinzel-decorative-latin-700-normal.woff2', 'fonts/cinzel-decorative-latin-900-normal.woff2',

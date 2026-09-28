@@ -14,6 +14,7 @@ import * as R from './regole.js';
 import { esegui } from './dadi.js';
 import { ico, sigillo } from './icone.js';
 import * as T from './tavolo.js';
+import { sommario } from './effetti.js';
 
 const M = {
   vista: 'gruppo', selezionati: new Set(), ini: null, codiceIni: null, tutte: {},
@@ -408,6 +409,11 @@ function contenutoScheda(id) {
       (pg.condizioni || []).map((cd) => h('span.comp-chip', T.nomeCondizione(cd))),
       pg.sfinimento ? h('span.comp-chip', `Sfinimento ${pg.sfinimento}`) : null,
       pg.pf.att <= 0 ? h('span.comp-chip', `TS morte ✔${pg.tsMorte?.succ || 0} ✖${pg.tsMorte?.fall || 0}`) : null) : null,
+    (pg.effetti || []).length || pg.concentrazione ? sezione('Effetti attivi',
+      pg.concentrazione ? h('p.sl-riassunto', `◎ Concentrazione: ${pg.concentrazione.nome} su ${(pg.concentrazione.bersagli || []).map((b) => b.nome).join(', ')}`) : null,
+      h('div.sl-lista', (pg.effetti || []).map((e) => h('div.sl-riga',
+        h('span.sl-voce', e.nome, e.da?.id && e.da.id !== pg.id ? h('small', ` da ${e.da.nome}`) : null),
+        h('small', sommario(e) || e.durata || ''))))) : null,
     sezione('Caratteristiche', h('p.nota', 'Tocca una caratteristica, un tiro salvezza o un\'abilità per chiedere quel tiro al giocatore.'),
       h('div.sl-car', R.CARATTERISTICHE.map((cr) => h('button.sl-car-box', { onclick: () => chiedi({ tipo: 'caratteristica', chiave: cr.id }) },
         h('small', cr.id), h('strong', R.segno(R.mod(pg.car[cr.id]))), h('span', pg.car[cr.id]))))),

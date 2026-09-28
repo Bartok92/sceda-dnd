@@ -6,6 +6,7 @@ import * as R from './regole.js';
 import { tira, selettoreModo } from './dadi.js';
 import { ico } from './icone.js';
 import { INCANTESIMI_BASE } from './incantesimi-base.js';
+import * as E from './effetti.js';
 import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento } from './dati2024.js';
 
 const pg = () => stato.pg;
@@ -218,11 +219,12 @@ async function apriTastierinoPF() {
     vibra([40, 30, 40]);
     if (p.pf.att <= 0) avviso('Sei a 0 PF: effettua i tiri salvezza contro la morte!', 'errore');
     if (p.pf.att > 0 && r.valore >= p.pf.max + p.pf.att) avviso('Danno massiccio: morte istantanea secondo le regole!', 'errore');
+    E.controllaConcentrazione(r.valore);
   } else avviso(r.azione === 'cura' ? `+${r.valore} PF` : `${r.valore} PF temporanei`);
 }
 
 function tiroMorte() {
-  const r = tira('1d20', 'Tiro salvezza contro la morte', { d20: true });
+  const r = E.tiraCon('1d20', 'Tiro salvezza contro la morte', 'ts', { d20: true });
   const n = r.naturale;
   modifica((x) => {
     if (n === 20) { x.pf.att = 1; x.tsMorte = { succ: 0, fall: 0 }; }
@@ -266,6 +268,7 @@ export function riposoBreve({ titolo = 'Riposo breve' } = {}) {
           x.risorse.forEach((r) => { if (r.ricarica === 'breve') r.usati = 0; else if (r.ricarica === 'breve1') r.usati = Math.max(0, r.usati - 1); });
           x.magia.pattoUsati = 0;
         });
+        E.dopoRiposo('breve');
         chiudi(); avviso('Riposo breve completato ☾');
       } }, 'Termina il riposo breve'));
   });
@@ -287,6 +290,8 @@ export async function riposoLungo({ senzaConferma = false } = {}) {
     x.tsMorte = { succ: 0, fall: 0 };
     if (x.sfinimento > 0) x.sfinimento--;
   });
+  await E.dopoRiposo('lungo');
+  modifica((x) => { x.pf.att = x.pf.max; });   // dopo aver tolto gli effetti (es. Aiuto) i PF restano al massimo
   avviso('Riposo lungo completato ☀ Sei in piena forma!');
 }
 
@@ -327,6 +332,7 @@ export function renderCombattimento(c) {
       p.attacchi.length ? p.attacchi.map(rigaAttacco) : h('p.vuoto', 'Nessun attacco. Aggiungi la tua arma o un trucchetto d\'attacco.'),
       h('button.btn.aggiungi', { onclick: () => modificaAttacco() }, '+ Aggiungi attacco')),
     renderPrivilegiCombattimento(),
+    E.renderAiutiGruppo(),
     renderMaestrie(),
     renderRisorse());
 }
@@ -370,16 +376,15 @@ function rigaAttacco(a) {
     h('div.att-info', { onclick: () => modificaAttacco(a) }, h('strong', a.nome), h('small', dettagli || 'tocca per modificare')),
     h('div.att-extra',
       mast ? h('button.chip-maestria' + (attiva ? '.attiva' : ''), { onclick: () => mostraMaestria(a, arma) }, `⚔ ${mast.nome}`) : null,
-      arma?.versatile ? h('button.chip-mini', { onclick: () => tira(R.attaccoDanni(p, a, { dadi: arma.versatile }), `${a.nome}: danni a due mani`) }, `a 2 mani ${arma.versatile}`) : null,
+      arma?.versatile ? h('button.chip-mini', { onclick: () => E.tiraCon(R.attaccoDanni(p, a, { dadi: arma.versatile }), `${a.nome}: danni a due mani`, 'danni') }, `a 2 mani ${arma.versatile}`) : null,
       pesante ? h('span.avviso-mini', '⚠ ' + pesante) : null),
-    h('button.btn-tiro', { onclick: () => tira('1d20' + fmtMod(bc), `${a.nome}: tiro per colpire`, { d20: true }) }, h('small', 'colpire'), R.segno(bc)),
+    h('button.btn-tiro', { onclick: () => E.tiraCon('1d20' + fmtMod(bc), `${a.nome}: tiro per colpire`, 'attacco', { d20: true }) }, h('small', 'colpire'), R.segno(bc) + R.dadiEffetti(p, 'attacco')),
     h('button.btn-tiro.danni', {
-      onclick: () => tira(danni, `${a.nome}: danni`),
-      oncontextmenu: (e) => { e.preventDefault(); tira(raddoppiaDadi(danni), `${a.nome}: danni CRITICI`); },
-    }, h('small', 'danni'), danni),
-    h('button.btn-tiro.crit', { onclick: () => tira(raddoppiaDadi(danni), `${a.nome}: danni CRITICI`), 'aria-label': 'Danni critici' }, h('small', 'crit'), '×2'));
+      onclick: () => E.tiraCon(danni, `${a.nome}: danni`, 'danni'),
+      oncontextmenu: (e) => { e.preventDefault(); E.tiraCon(danni, `${a.nome}: danni CRITICI`, 'danni', {}, { critico: true }); },
+    }, h('small', 'danni'), danni + R.dadiEffetti(p, 'danni')),
+    h('button.btn-tiro.crit', { onclick: () => E.tiraCon(danni, `${a.nome}: danni CRITICI`, 'danni', {}, { critico: true }), 'aria-label': 'Danni critici' }, h('small', 'crit'), '×2'));
 }
-const raddoppiaDadi = (e) => e.replace(/(\d*)d(\d+)/g, (_, n, f) => `${(Number(n) || 1) * 2}d${f}`);
 
 // Menu a tendina con tutte le armi del manuale, divise per categoria
 export function selettoreArma(valore, onCambia, { vuoto = '— Nessuna (attacco personalizzato) —', senzArmi = true } = {}) {
@@ -577,7 +582,7 @@ export function renderCaratteristiche(c) {
     h('div.car-griglia', R.CARATTERISTICHE.map((cr) => {
       const m = R.mod(p.car[cr.id]);
       return h('div.car-box' + (modificaPunteggi ? '.modifica' : ''),
-        h('button.car-tocca', { onclick: () => !modificaPunteggi && tira('1d20' + fmtMod(R.bonusProva(p, cr.id)), `Prova di ${cr.nome}`, { d20: true }) },
+        h('button.car-tocca', { onclick: () => !modificaPunteggi && E.tiraCon('1d20' + fmtMod(R.bonusProva(p, cr.id)), `Prova di ${cr.nome}`, 'prova', { d20: true }) },
           h('small', cr.nome), h('strong', R.segno(m)), h('span.car-punteggio', p.car[cr.id])),
         modificaPunteggi ? contatore(p.car[cr.id], (v) => modifica((x) => (x.car[cr.id] = v)), { min: 1, max: 30 }) : null);
     })),
@@ -588,8 +593,8 @@ export function renderCaratteristiche(c) {
         const b = R.bonusTS(p, cr.id), ha = p.tsComp.includes(cr.id);
         return h('div.riga-abilita',
           h('button.comp' + (ha ? '.l1' : ''), { 'aria-label': 'Competenza', onclick: () => modifica((x) => { const i = x.tsComp.indexOf(cr.id); i >= 0 ? x.tsComp.splice(i, 1) : x.tsComp.push(cr.id); }) }),
-          h('button.ab-nome', { onclick: () => tira('1d20' + fmtMod(b), `TS su ${cr.nome}`, { d20: true }) }, cr.nome),
-          h('span.ab-bonus', R.segno(b)));
+          h('button.ab-nome', { onclick: () => E.tiraCon('1d20' + fmtMod(b), `TS su ${cr.nome}`, 'ts', { d20: true }) }, cr.nome),
+          h('span.ab-bonus', R.segno(b) + R.dadiEffetti(p, 'ts')));
       })),
     card('Abilità',
       h('p.nota', `Tocca il pallino: ○ nessuna, ● competenza (+${comp}), ◉ maestria (+${comp * 2}). Tocca il nome per tirare.`),
@@ -597,7 +602,7 @@ export function renderCaratteristiche(c) {
         const l = p.abilita[ab.id] || 0, b = R.bonusAbilita(p, ab);
         return h('div.riga-abilita',
           h('button.comp.l' + l, { 'aria-label': 'Competenza', onclick: () => modifica((x) => (x.abilita[ab.id] = ((x.abilita[ab.id] || 0) + 1) % 3)) }),
-          h('button.ab-nome', { onclick: () => tira('1d20' + fmtMod(b), `${ab.nome} (${ab.car})`, { d20: true }) }, ab.nome, h('small', ' ' + ab.car),
+          h('button.ab-nome', { onclick: () => E.tiraCon('1d20' + fmtMod(b), `${ab.nome} (${ab.car})`, 'prova', { d20: true }) }, ab.nome, h('small', ' ' + ab.car),
             ab.id === 'furtivita' && R.svantaggioFurtivita(p) ? h('span.badge.rosso', 'svantaggio') : null),
           h('span.ab-bonus', R.segno(b)));
       })),
@@ -615,7 +620,7 @@ export function renderMagie(c) {
   c.append(
     h('div.stat-griglia.tre',
       h('div.stat-box', ico('scudo'), h('small', 'CD incantesimi'), h('strong', cd ?? '—')),
-      h('button.stat-box', { onclick: () => att != null && tira('1d20' + fmtMod(att), 'Attacco con incantesimo', { d20: true }) }, ico('magie'), h('small', 'Attacco magico'), h('strong', att != null ? R.segno(att) : '—')),
+      h('button.stat-box', { onclick: () => att != null && E.tiraCon('1d20' + fmtMod(att), 'Attacco con incantesimo', 'attacco', { d20: true }) }, ico('magie'), h('small', 'Attacco magico'), h('strong', att != null ? R.segno(att) : '—')),
       h('button.stat-box', { onclick: apriImpostazioniMagia }, ico('stella'), h('small', 'Caratteristica'), h('strong', m.car || '—'), h('small', 'tocca'))),
     renderDaPreparare(),
     card('Slot incantesimo',
@@ -692,22 +697,34 @@ function cartaIncantesimo(s) {
 
 function lancia(s) {
   const p = pg();
-  if (s.livello === 0) { avviso(`Lanci ${s.nome}`); return tiraSeServe(s); }
+  // Se l'incantesimo si può lanciare su di sé o su un compagno (catalogo delle regole), dopo lo slot si sceglie il bersaglio
+  const def = E.trovaIncantesimo(s);
+  const info = { nome: s.nome, conc: s.concentrazione ?? def?.conc, durata: s.durata || def?.durata };
+  let conEffetto = false;   // incantesimi fuori catalogo: "applica un effetto a te o a un compagno"
+  const dopo = (liv) => {
+    if (def) E.lanciaSu(def, liv, info);
+    else if (conEffetto) E.effettoPersonalizzato({ ...info, gittata: s.gittata });
+    else tiraSeServe(s);
+  };
+  if (s.livello === 0) { avviso(`Lanci ${s.nome}`); return dopo(0); }
   const max = R.slotMassimi(p); const patto = R.slotPatto(p);
   const opzioni = [];
   max.forEach((n, i) => { if (i + 1 >= s.livello && n > 0) opzioni.push({ tipo: 'slot', liv: i + 1, disp: n - (p.magia.slotUsati[i] || 0) }); });
   if (patto && patto.liv >= s.livello) opzioni.push({ tipo: 'patto', liv: patto.liv, disp: patto.n - p.magia.pattoUsati });
   pannello(`Lancia ${s.nome}`, (c, chiudi) => {
-    c.append(h('p', 'Scegli lo slot da consumare:'),
+    c.append(
+      def ? h('p.nota', `✦ ${def.testo}. Dopo lo slot scegli su chi lanciarlo${def.bersagli === 'se' ? ' (solo su di te)' : ''}.`)
+        : h('label.spunta', h('input', { type: 'checkbox', onchange: (e) => (conEffetto = e.target.checked) }), ' Ha effetto su di me o su un compagno (scelgo cosa fa)'),
+      h('p', 'Scegli lo slot da consumare:'),
       opzioni.length ? h('div.lista-scelte', opzioni.map((o) => h('button.btn.grande' + (o.disp <= 0 ? '.disab' : ''), {
         disabled: o.disp <= 0,
         onclick: () => {
           modifica((x) => { if (o.tipo === 'patto') x.magia.pattoUsati++; else x.magia.slotUsati[o.liv - 1] = (x.magia.slotUsati[o.liv - 1] || 0) + 1; });
-          chiudi(); avviso(`${s.nome} lanciato con uno slot di ${o.liv}° livello`); tiraSeServe(s);
+          chiudi(); avviso(`${s.nome} lanciato con uno slot di ${o.liv}° livello`); dopo(o.liv);
         },
       }, `${o.tipo === 'patto' ? 'Patto' : 'Slot'} ${o.liv}° livello — ${o.disp} disponibili`))) : h('p.vuoto', 'Nessuno slot adatto.'),
-      s.rituale ? h('button.btn', { onclick: () => { chiudi(); avviso(`${s.nome} lanciato come rituale (+10 minuti)`); } }, 'Lancia come rituale (senza slot)') : null,
-      h('button.btn', { onclick: () => { chiudi(); avviso(`${s.nome} lanciato senza consumare slot`); } }, 'Lancia senza consumare slot'));
+      s.rituale ? h('button.btn', { onclick: () => { chiudi(); avviso(`${s.nome} lanciato come rituale (+10 minuti)`); dopo(s.livello); } }, 'Lancia come rituale (senza slot)') : null,
+      h('button.btn', { onclick: () => { chiudi(); avviso(`${s.nome} lanciato senza consumare slot`); dopo(s.livello); } }, 'Lancia senza consumare slot'));
   });
 }
 function tiraSeServe(s) {

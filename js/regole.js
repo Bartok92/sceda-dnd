@@ -174,15 +174,36 @@ export function slotPatto(pg) {
   return { n, liv };
 }
 
+// ───── Effetti attivi (incantesimi e privilegi ricevuti, vedi effetti.js) ─────
+// pg.effetti = [{ id, nome, da, conc, durata, mod: { ca, caMin, armaturaMagica, ts, tsDado, attacco, attaccoDado,
+//   danni, danniDado, provaDado, pfMax, velocita, velocitaX, abilita: { id: n } }, nota, condizione, usi, dadoLibero }]
+// Due effetti con lo stesso nome non si sommano (regola degli effetti dello stesso incantesimo): conta il più forte.
+export function effettiAttivi(pg) {
+  const perNome = new Map();
+  for (const e of pg.effetti || []) {
+    const k = String(e.nome || '').toLowerCase();
+    const prima = perNome.get(k);
+    const forza = (x) => Object.values(x?.mod || {}).reduce((s, v) => s + (typeof v === 'number' ? v : 1), 0);
+    if (!prima || forza(e) > forza(prima)) perNome.set(k, e);
+  }
+  return [...perNome.values()];
+}
+export const sommaEffetti = (pg, k) => effettiAttivi(pg).reduce((s, e) => s + (Number(e.mod?.[k]) || 0), 0);
+const CHIAVI_DADI = { attacco: 'attaccoDado', ts: 'tsDado', prova: 'provaDado', danni: 'danniDado' };
+export const effettiConDadi = (pg, ambito) => effettiAttivi(pg).filter((e) => e.mod?.[CHIAVI_DADI[ambito]]);
+// Dadi da aggiungere ai tiri: es. Benedizione → "+1d4" su attacchi e TS
+export const dadiEffetti = (pg, ambito) => effettiConDadi(pg, ambito).map((e) => '+' + e.mod[CHIAVI_DADI[ambito]]).join('');
+
 // Tutti i tiri d20 (prove, TS, attacchi, iniziativa) includono il malus dello Sfinimento
 export function bonusAbilita(pg, ab, { passiva = false } = {}) {
   const liv = pg.abilita?.[ab.id] || 0;
-  return mod(pg.car[ab.car]) + liv * competenza(pg.livello) + (pg.bonusAbilita?.[ab.id] || 0) + (passiva ? 0 : malusSfinimento(pg));
+  const daEffetti = effettiAttivi(pg).reduce((s, e) => s + (Number(e.mod?.abilita?.[ab.id]) || 0), 0);
+  return mod(pg.car[ab.car]) + liv * competenza(pg.livello) + (pg.bonusAbilita?.[ab.id] || 0) + daEffetti + (passiva ? 0 : malusSfinimento(pg));
 }
 export const bonusProva = (pg, car) => mod(pg.car[car]) + malusSfinimento(pg);
 export function bonusTS(pg, car) {
-  // bonusTiriSalvezza: bonus a tutti i TS (es. Aura di protezione del paladino)
-  return mod(pg.car[car]) + (pg.tsComp?.includes(car) ? competenza(pg.livello) : 0) + (Number(pg.bonusTiriSalvezza) || 0) + malusSfinimento(pg);
+  // bonusTiriSalvezza: bonus a tutti i TS sempre attivo; gli effetti (es. Aura di protezione ricevuta) si aggiungono
+  return mod(pg.car[car]) + (pg.tsComp?.includes(car) ? competenza(pg.livello) : 0) + (Number(pg.bonusTiriSalvezza) || 0) + sommaEffetti(pg, 'ts') + malusSfinimento(pg);
 }
 export function percezionePassiva(pg) {
   return 10 + bonusAbilita(pg, ABILITA.find((a) => a.id === 'percezione'), { passiva: true });
@@ -205,9 +226,16 @@ export function attaccoIncantesimi(pg) {
 export const armaturaIndossata = (pg) => (pg.inventario || []).find((o) => o.equip && o.slot === 'armatura' && o.armatura);
 export const scudoImbracciato = (pg) => (pg.inventario || []).find((o) => o.equip && (o.tipo === 'scudo' || o.armatura?.tipo === 'scudo'));
 
+// Effetti sulla CA: bonus (Scudo della fede +2) e minimi (Pelle coriacea: non meno di 17)
+function caConEffetti(pg, v) {
+  v += sommaEffetti(pg, 'ca');
+  const minimo = Math.max(0, ...effettiAttivi(pg).map((e) => Number(e.mod?.caMin) || 0));
+  return Math.max(v, minimo);
+}
+
 export function classeArmatura(pg) {
   const ca = pg.ca || {};
-  if (ca.modo === 'manuale') return Number(ca.manuale) || 10;
+  if (ca.modo === 'manuale') return caConEffetti(pg, Number(ca.manuale) || 10);
   const des = mod(pg.car.DES);
   const eq = (pg.inventario || []).filter((o) => o.equip);
   const arm = armaturaIndossata(pg);
@@ -221,10 +249,11 @@ export function classeArmatura(pg) {
     const candidati = [10 + des];
     if (classi.includes('Barbaro')) candidati.push(10 + des + mod(pg.car.COS));
     if (classi.includes('Monaco') && !scudoImbracciato(pg)) candidati.push(10 + des + mod(pg.car.SAG));
+    if (effettiAttivi(pg).some((e) => e.mod?.armaturaMagica)) candidati.push(13 + des);   // Armatura magica
     val = Math.max(...candidati);
   }
   eq.forEach((o) => (val += Number(o.bonusCA) || 0));
-  return val + (Number(ca.bonus) || 0);
+  return caConEffetti(pg, val + (Number(ca.bonus) || 0));
 }
 
 // Competenze in armi e armature: classe iniziale + ciò che danno le classi prese in multiclasse (regole 2024)
@@ -268,6 +297,11 @@ export function velocitaEffettiva(pg) {
   const arm = armaturaIndossata(pg);
   if (arm?.armatura?.forza && (Number(pg.car.FOR) || 0) < arm.armatura.forza) { v -= 3; note.push('armatura −3 m'); }
   if (pg.sfinimento > 0) { v -= 1.5 * pg.sfinimento; note.push(`sfinimento −${String(1.5 * pg.sfinimento).replace('.', ',')} m`); }
+  for (const e of effettiAttivi(pg)) {
+    if (Number(e.mod?.velocita)) { v += Number(e.mod.velocita); note.push(`${e.nome} +${String(e.mod.velocita).replace('.', ',')} m`); }
+  }
+  const molt = Math.max(1, ...effettiAttivi(pg).map((e) => Number(e.mod?.velocitaX) || 1));
+  if (molt > 1) { v *= molt; note.push(`×${molt} (${effettiAttivi(pg).find((e) => Number(e.mod?.velocitaX) === molt)?.nome})`); }
   const zero = (pg.condizioni || []).find((c) => EFFETTI_CONDIZIONI[c]?.velocitaZero);
   if (zero) { v = 0; note.push(CONDIZIONI.find((c) => c.id === zero)?.nome.toLowerCase()); }
   return { valore: Math.max(0, v), note };
@@ -341,12 +375,12 @@ export function attaccoBonus(pg, att) {
   const c = carAttacco(pg, att);
   let b = c ? mod(pg.car[c]) : 0;
   if (att.comp) b += competenza(pg.livello);
-  return b + (Number(att.bonus) || 0) + malusSfinimento(pg);
+  return b + (Number(att.bonus) || 0) + sommaEffetti(pg, 'attacco') + malusSfinimento(pg);
 }
 // Danni già sommati: "1d12" + FOR 5 + magico 2 → "1d12+7" (se i dadi sono solo un numero, es. colpo senz'armi "1", fa la somma)
 export function attaccoDanni(pg, att, { dadi } = {}) {
   const c = carAttacco(pg, att);
-  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0);
+  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0) + sommaEffetti(pg, 'danni');
   const s = String(dadi || att.danni || '').trim() || '1';
   if (/^\d+$/.test(s)) return String(Math.max(1, Number(s) + fisso));
   return fisso ? s + (fisso > 0 ? '+' : '') + fisso : s;

@@ -11,9 +11,10 @@ import { esportaBackup, importaBackup } from './backup.js';
 import { ico, sigillo } from './icone.js';
 import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, pulsanteTema, nomeTema } from './temi.js';
 import * as T from './tavolo.js';
+import * as E from './effetti.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.8.0';
+export const VERSIONE_APP = '1.9.0';
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
 const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
@@ -53,7 +54,7 @@ function braci(n = 16) {
   }));
 }
 const RENDER = {
-  eroe: (c) => { S.renderIntestazione(c); S.renderVita(c); T.renderStrisciaCompagni(c); S.renderCondizioni(c); },
+  eroe: (c) => { S.renderIntestazione(c); S.renderVita(c); E.renderEffetti(c); T.renderStrisciaCompagni(c); S.renderCondizioni(c); },
   combatti: S.renderCombattimento,
   car: S.renderCaratteristiche,
   magie: S.renderMagie,

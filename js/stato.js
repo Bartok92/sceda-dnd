@@ -47,6 +47,7 @@ export function personaggioVuoto() {
     risorse: [], tratti: [], competenzeAltre: '', note: '',
     talenti: [], maestrie: [],   // talenti con effetto automatico; armi di cui si usa la maestria (id del manuale)
     modelli: [], animazione: '', tema: '',   // tema: '' = segue il tema generale
+    effetti: [], concentrazione: null,       // effetti ricevuti (Scudo della fede…) e concentrazione di chi lancia (effetti.js)
     storicoDadi: [],
   };
 }
