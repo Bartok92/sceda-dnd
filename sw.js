@@ -1,6 +1,6 @@
 // Service worker: rende l'app utilizzabile senza internet dopo la prima apertura.
 // Quando pubblichi una nuova versione, aumenta il numero qui sotto.
-const VERSIONE = 'scheda-dnd-v1.6.0';
+const VERSIONE = 'scheda-dnd-v1.6.1';
 
 const FILE_APP = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
@@ -18,7 +18,13 @@ const FILE_APP = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSIONE).then((c) => c.addAll(FILE_APP.map((u) => new Request(u, { cache: 'reload' })))));
+  e.waitUntil((async () => {
+    const c = await caches.open(VERSIONE);
+    await c.addAll(FILE_APP.map((u) => new Request(u, { cache: 'reload' })));
+    // Le versioni fino alla 1.5 rispondevano a ogni indirizzo con la pagina generica, anche per l'edizione iPhone:
+    // se ne trovo una, mi attivo subito (una volta sola), così la pagina iphone/ non resta bloccata.
+    if ((await caches.keys()).some((k) => /^scheda-dnd-v1\.[0-5]\./.test(k))) self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
