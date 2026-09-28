@@ -162,7 +162,9 @@ export const SPECIE = {
     T('Stirpe elfica', 'Drow: trucchetto Luci danzanti. Alto elfo: trucchetto Prestidigitazione. Elfo dei boschi: trucchetto Arte druidica e velocità 10,5 m. Altri incantesimi al 3° e al 5° livello.'),
     T('Ascendenza fatata', 'Vantaggio ai tiri salvezza per non essere affascinato.'),
     T('Sensi acuti', 'Competenza in Intuizione, Percezione o Sopravvivenza (a scelta).'),
-    T('Trance', 'Completi un riposo lungo in 4 ore di trance, restando cosciente.')], risorse: [] },
+    T('Trance', 'Completi un riposo lungo in 4 ore di trance, restando cosciente.')],
+    risorse: [{ id: 'stirpe-elfica-3', nome: 'Stirpe elfica: incantesimo del 3° livello (gratis)', max: 1, ricarica: 'lungo', daLivello: 3 },
+      { id: 'stirpe-elfica-5', nome: 'Stirpe elfica: incantesimo del 5° livello (gratis)', max: 1, ricarica: 'lungo', daLivello: 5 }] },
   'Gnomo': { en: 'Gnome', taglia: 'Piccola', vel: 9, tratti: [
     T('Scurovisione', 'Vedi al buio fino a 18 m.'),
     T('Astuzia gnomesca', 'Vantaggio ai tiri salvezza su Intelligenza, Saggezza e Carisma.'),
@@ -192,7 +194,9 @@ export const SPECIE = {
   'Tiefling': { en: 'Tiefling', taglia: 'Media o Piccola', vel: 9, tratti: [
     T('Scurovisione', 'Vedi al buio fino a 18 m.'),
     T('Retaggio immondo', 'Abissale: resistenza al veleno e trucchetto Spruzzo velenoso. Ctonio: resistenza necrotica e Tocco gelido. Infernale: resistenza al fuoco e Dardo di fuoco. Altri incantesimi al 3° e al 5° livello.'),
-    T('Presenza ultraterrena', 'Conosci il trucchetto Taumaturgia.')], risorse: [] },
+    T('Presenza ultraterrena', 'Conosci il trucchetto Taumaturgia.')],
+    risorse: [{ id: 'retaggio-immondo-3', nome: 'Retaggio immondo: incantesimo del 3° livello (gratis)', max: 1, ricarica: 'lungo', daLivello: 3 },
+      { id: 'retaggio-immondo-5', nome: 'Retaggio immondo: incantesimo del 5° livello (gratis)', max: 1, ricarica: 'lungo', daLivello: 5 }] },
   'Umano': { en: 'Human', taglia: 'Media o Piccola', vel: 9, tratti: [
     T('Intraprendente', 'Ottieni Ispirazione eroica ogni volta che finisci un riposo lungo.'),
     T('Abile', 'Competenza in un\'abilità a tua scelta.'),
@@ -244,6 +248,7 @@ export function privilegiCombattimento(classe, l, pg) {
   if (classe === 'Bardo') out.push({ nome: 'Ispirazione bardica', dadi: '1' + perLivello([[1, 'd6'], [5, 'd8'], [10, 'd10'], [15, 'd12']], l), testo: 'Il dado che dai a un alleato: lo aggiunge a un suo tiro d20.' });
   if (classe === 'Ranger') out.push({ nome: 'Marchio del cacciatore', dadi: l >= 20 ? '1d10' : '1d6', testo: 'Danni extra (forza) quando colpisci il bersaglio marchiato.' });
   if (classe === 'Paladino' && l >= 11) out.push({ nome: 'Colpi radiosi', dadi: '1d8', testo: 'Quando colpisci con un\'arma da mischia o un colpo senz\'armi: +1d8 radiosi.' });
+  if (classe === 'Guerriero' && l >= 9) out.push({ nome: 'Indomito', fisso: l, testo: `Se fallisci un tiro salvezza puoi ritirarlo con +${l} (il tuo livello da guerriero) e devi tenere il nuovo risultato. Gli usi sono tra le Risorse.` });
   return out;
 }
 
@@ -256,22 +261,35 @@ export function risorseClasse(classe, l, pg) {
   switch (classe) {
     case 'Barbaro': add('ira', 'Ira', perLivello([[1, 2], [3, 3], [6, 4], [12, 5], [17, 6]], l), 'breve1'); break;
     case 'Bardo': add('ispirazione', 'Ispirazione bardica', Math.max(1, mod('CAR')), l >= 5 ? 'breve' : 'lungo'); break;
-    case 'Chierico': add('canalizzare', 'Incanalare divinità', perLivello([[2, 2], [6, 3], [18, 4]], l), 'breve1'); break;
+    case 'Chierico':
+      add('canalizzare', 'Incanalare divinità', perLivello([[2, 2], [6, 3], [18, 4]], l), 'breve1');
+      add('intervento-divino', 'Intervento divino', l >= 10 ? 1 : 0, 'lungo'); break;
     case 'Druido': add('forma-selvatica', 'Forma selvatica', perLivello([[2, 2], [6, 3], [17, 4]], l), 'breve1'); break;
     case 'Guerriero':
       add('secondo-fiato', 'Secondo fiato', perLivello([[1, 2], [4, 3], [10, 4]], l), 'breve1', ['recupero', 'recuperare energie']);
       add('azione-impetuosa', 'Azione impetuosa', perLivello([[2, 1], [17, 2]], l), 'breve');
       add('indomito', 'Indomito', perLivello([[9, 1], [13, 2], [17, 3]], l), 'lungo'); break;
-    case 'Monaco': add('focus', 'Punti concentrazione', l >= 2 ? l : 0, 'breve', ['ki', 'punti ki']); break;
+    case 'Monaco':
+      add('focus', 'Punti concentrazione', l >= 2 ? l : 0, 'breve', ['ki', 'punti ki']);
+      add('metabolismo', 'Metabolismo straordinario', l >= 2 ? 1 : 0, 'lungo'); break;
     case 'Paladino':
       add('imposizione', 'Imposizione delle mani (PF)', 5 * l, 'lungo');
-      add('canalizzare', 'Incanalare divinità', perLivello([[3, 2], [11, 3]], l), 'breve1'); break;
-    case 'Ranger': add('nemico-prescelto', 'Nemico prescelto (Marchio del cacciatore gratis)', perLivello([[1, 2], [5, 3], [9, 4], [13, 5], [17, 6]], l), 'lungo'); break;
+      add('canalizzare', 'Incanalare divinità', perLivello([[3, 2], [11, 3]], l), 'breve1');
+      add('punizione-paladino', 'Punizione del paladino (Punizione divina gratis)', l >= 2 ? 1 : 0, 'lungo');
+      add('destriero-fedele', 'Destriero fedele (Trova destriero gratis)', l >= 5 ? 1 : 0, 'lungo'); break;
+    case 'Ranger':
+      add('nemico-prescelto', 'Nemico prescelto (Marchio del cacciatore gratis)', perLivello([[1, 2], [5, 3], [9, 4], [13, 5], [17, 6]], l), 'lungo');
+      add('instancabile', 'Instancabile (1d8 + SAG PF temporanei)', l >= 10 ? Math.max(1, mod('SAG')) : 0, 'lungo');
+      add('velo-natura', 'Velo della natura', l >= 14 ? Math.max(1, mod('SAG')) : 0, 'lungo'); break;
     case 'Ladro': add('colpo-di-fortuna', 'Colpo di fortuna', l >= 20 ? 1 : 0, 'breve'); break;
     case 'Stregone':
       add('stregoneria', 'Punti stregoneria', l >= 2 ? l : 0, 'lungo');
-      add('stregoneria-innata', 'Stregoneria innata', 2, 'lungo'); break;
-    case 'Warlock': add('astuzia-magica', 'Astuzia magica', l >= 2 ? 1 : 0, 'lungo'); break;
+      add('stregoneria-innata', 'Stregoneria innata', 2, 'lungo');
+      add('recupero-stregonesco', 'Recupero stregonesco', l >= 5 ? 1 : 0, 'lungo'); break;
+    case 'Warlock':
+      add('astuzia-magica', 'Astuzia magica', l >= 2 ? 1 : 0, 'lungo');
+      add('contattare-patrono', 'Contattare il patrono', l >= 9 ? 1 : 0, 'lungo');
+      [[11, 6], [13, 7], [15, 8], [17, 9]].forEach(([da, liv]) => add(`arcano-mistico-${liv}`, `Arcano mistico (${liv}° livello)`, l >= da ? 1 : 0, 'lungo')); break;
     case 'Mago': add('recupero-arcano', 'Recupero arcano', 1, 'lungo'); break;
   }
   return r;
@@ -291,6 +309,59 @@ export function trucchettiClasse(classe, l) {
   const base = { Bardo: 2, Chierico: 3, Druido: 2, Stregone: 4, Warlock: 2, Mago: 3 }[classe];
   return base ? base + (l >= 4 ? 1 : 0) + (l >= 10 ? 1 : 0) : 0;
 }
+
+// ───────────────────────── Acquisto a punti (capitolo 2) ─────────────────────────
+// 27 punti da spendere; ogni punteggio parte da 8 e arriva al massimo a 15 (prima degli aumenti del background)
+export const COSTO_PUNTI = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 };
+export const PUNTI_DISPONIBILI = 27;
+
+// Caratteristiche principali di ogni classe: per il multiclasse serve almeno 13 in quelle della classe nuova
+// e di quelle che hai già (per il Guerriero basta Forza O Destrezza)
+export const CARATTERISTICHE_PRINCIPALI = {
+  Barbaro: ['FOR'], Bardo: ['CAR'], Chierico: ['SAG'], Druido: ['SAG'], Guerriero: ['FOR|DES'], Ladro: ['DES'],
+  Mago: ['INT'], Monaco: ['DES', 'SAG'], Paladino: ['FOR', 'CAR'], Ranger: ['DES', 'SAG'], Stregone: ['CAR'], Warlock: ['CAR'],
+};
+
+// ───────────────────────── Privilegi di classe per livello (tabelle del Manuale del Giocatore 2024) ─────────────────────────
+// Un elenco per classe con i 20 livelli; ASI = Aumento dei punteggi di caratteristica, SUB = privilegio della sottoclasse, EPICO = Dono epico
+const ASI = 'Aumento dei punteggi di caratteristica (o un altro talento)';
+const SUB = 'Privilegio della sottoclasse';
+const EPICO = 'Dono epico (un talento epico)';
+export const PRIVILEGI_LIVELLO = {
+  Barbaro: [['Ira', 'Difesa senza armatura', 'Maestria nelle armi'], ['Percezione del pericolo', 'Attacco irruento'], ['Sottoclasse del barbaro', 'Conoscenza primordiale'], [ASI],
+    ['Attacco extra', 'Movimento veloce'], [SUB], ['Istinto ferino', 'Balzo istintivo'], [ASI], ['Colpo brutale'], [SUB], ['Ira implacabile'], [ASI],
+    ['Colpo brutale migliorato'], [SUB], ['Ira persistente'], [ASI], ['Colpo brutale migliorato'], ['Potenza indomabile'], [EPICO], ['Campione primordiale']],
+  Bardo: [['Ispirazione bardica', 'Incantesimi'], ['Maestria (competenza doppia in 2 abilità)', 'Tuttofare'], ['Sottoclasse del bardo'], [ASI], ['Fonte di ispirazione'], [SUB],
+    ['Controfascino'], [ASI], ['Maestria (altre 2 abilità)'], ['Segreti magici'], [], [ASI], [], [SUB], [], [ASI], [], ['Ispirazione superiore'], [EPICO], ['Parole della creazione']],
+  Chierico: [['Incantesimi', 'Ordine divino'], ['Incanalare divinità'], ['Sottoclasse del chierico'], [ASI], ['Bruciare non morti'], [SUB], ['Colpi benedetti'], [ASI], [],
+    ['Intervento divino'], [], [ASI], [], ['Colpi benedetti migliorati'], [], [ASI], [SUB], [], [EPICO], ['Intervento divino superiore']],
+  Druido: [['Incantesimi', 'Druidico', 'Ordine primordiale'], ['Forma selvatica', 'Compagno selvatico'], ['Sottoclasse del druido'], [ASI], ['Rinascita selvatica'], [SUB],
+    ['Furia elementale'], [ASI], [], [SUB], [], [ASI], [], [SUB], ['Furia elementale migliorata'], [ASI], [], ['Incantesimi bestiali'], [EPICO], ['Arcidruido']],
+  Guerriero: [['Stile di combattimento', 'Secondo fiato', 'Maestria nelle armi'], ['Azione impetuosa (un uso)', 'Mente tattica'], ['Sottoclasse del guerriero'], [ASI],
+    ['Attacco extra', 'Spostamento tattico'], [ASI], [SUB], [ASI], ['Indomito (un uso)', 'Maestro tattico'], [SUB], ['Due attacchi extra'], [ASI],
+    ['Indomito (due usi)', 'Attacchi studiati'], [ASI], [SUB], [ASI], ['Azione impetuosa (due usi)', 'Indomito (tre usi)'], [SUB], [EPICO], ['Tre attacchi extra']],
+  Ladro: [['Maestria (competenza doppia in 2 abilità)', 'Attacco furtivo', 'Gergo dei ladri', 'Maestria nelle armi'], ['Azione scaltra'], ['Sottoclasse del ladro', 'Mira ferma'], [ASI],
+    ['Colpo astuto', 'Schivata prodigiosa'], ['Maestria (altre 2 abilità)'], ['Elusione', 'Talento affidabile'], [ASI], [SUB], [ASI], ['Colpo astuto migliorato'], [ASI],
+    [SUB], ['Colpi subdoli'], ['Mente sfuggente'], [ASI], [SUB], ['Inafferrabile'], [EPICO], ['Colpo di fortuna']],
+  Mago: [['Incantesimi', 'Esperto di rituali', 'Recupero arcano'], ['Studioso'], ['Sottoclasse del mago'], [ASI], ['Memorizzare un incantesimo'], [SUB], [], [ASI], [], [SUB],
+    [], [ASI], [], [SUB], [], [ASI], [], ['Padronanza degli incantesimi'], [EPICO], ['Incantesimi distintivi']],
+  Monaco: [['Arti marziali', 'Difesa senza armatura'], ['Concentrazione del monaco', 'Movimento senza armatura', 'Metabolismo straordinario'], ['Deviare attacchi', 'Sottoclasse del monaco'],
+    [ASI, 'Caduta lenta'], ['Attacco extra', 'Colpo stordente'], ['Colpi potenziati', SUB], ['Elusione'], [ASI], ['Movimento acrobatico'], ['Concentrazione accresciuta', 'Autoguarigione'],
+    [SUB], [ASI], ['Deviare energia'], ['Sopravvissuto disciplinato'], ['Concentrazione perfetta'], [ASI], [SUB], ['Difesa superiore'], [EPICO], ['Corpo e mente']],
+  Paladino: [['Imposizione delle mani', 'Incantesimi', 'Maestria nelle armi'], ['Stile di combattimento', 'Punizione del paladino'], ['Incanalare divinità', 'Sottoclasse del paladino'], [ASI],
+    ['Attacco extra', 'Destriero fedele'], ['Aura di protezione'], [SUB], [ASI], ['Abiurare i nemici'], ['Aura di coraggio'], ['Colpi radiosi'], [ASI], [], ['Tocco ristoratore'],
+    [SUB], [ASI], [], ['Espansione dell\'aura'], [EPICO], [SUB]],
+  Ranger: [['Incantesimi', 'Nemico prescelto', 'Maestria nelle armi'], ['Esploratore abile', 'Stile di combattimento'], ['Sottoclasse del ranger'], [ASI], ['Attacco extra'], ['Girovago'],
+    [SUB], [ASI], ['Maestria (competenza doppia in 2 abilità)'], ['Instancabile'], [SUB], [ASI], ['Cacciatore implacabile'], ['Velo della natura'], [SUB], [ASI],
+    ['Cacciatore preciso'], ['Sensi ferini'], [EPICO], ['Sterminatore di nemici']],
+  Stregone: [['Incantesimi', 'Stregoneria innata'], ['Fonte di magia', 'Metamagia'], ['Sottoclasse dello stregone'], [ASI], ['Recupero stregonesco'], [SUB], ['Stregoneria incarnata'],
+    [ASI], [], ['Metamagia (altre opzioni)'], [], [ASI], [], [SUB], [], [ASI], ['Metamagia (altre opzioni)'], [SUB], [EPICO], ['Apoteosi arcana']],
+  Warlock: [['Suppliche occulte', 'Magia del patto'], ['Astuzia magica'], ['Sottoclasse del warlock'], [ASI], [], [SUB], [], [ASI], ['Contattare il patrono'], [SUB],
+    ['Arcano mistico (incantesimo di 6° livello)'], [ASI], ['Arcano mistico (incantesimo di 7° livello)'], [SUB], ['Arcano mistico (incantesimo di 8° livello)'], [ASI],
+    ['Arcano mistico (incantesimo di 9° livello)'], [], [EPICO], ['Maestro dell\'occulto']],
+};
+// Privilegi che si ottengono a un certo livello di una classe
+export const privilegiAlLivello = (classe, l) => PRIVILEGI_LIVELLO[classe]?.[l - 1] || [];
 
 // ───────────────────────── Sfinimento e condizioni (2024) ─────────────────────────
 export const SFINIMENTO_2024 = 'Ogni livello: −2 a tutti i tiri d20 (prove, tiri per colpire, tiri salvezza) e −1,5 m di velocità. Al 6° livello muori. Un riposo lungo toglie un livello.';

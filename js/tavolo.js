@@ -20,7 +20,7 @@ import { db, nuovoId } from './db.js';
 import { stato, suCambio, modifica } from './stato.js';
 import * as R from './regole.js';
 import { ico, sigillo } from './icone.js';
-import { applicaPF, riposoBreve, riposoLungo } from './scheda.js';
+import { applicaPF, avvisaMorte, riposoBreve, riposoLungo } from './scheda.js';
 import { tira } from './dadi.js';
 import * as E from './effetti.js';
 
@@ -640,7 +640,7 @@ function chiestoRiposo(m) {
   vibra([30, 40, 30]);
   pannello(lungo ? '☀ Riposo lungo' : '☾ Riposo breve', (c, chiudi) => {
     c.append(h('p', `${m.da?.nome || 'Il Master'} concede un riposo ${lungo ? 'lungo (8 ore)' : 'breve (1 ora)'}.`),
-      h('p.nota', lungo ? 'PF al massimo, metà dei dadi vita, tutti gli slot e le risorse.' : 'Puoi spendere dadi vita per recuperare PF; si ricaricano le risorse "a riposo breve".'),
+      h('p.nota', lungo ? 'PF al massimo, tutti i dadi vita, tutti gli slot e le risorse, −1 Sfinimento.' : 'Puoi spendere dadi vita per recuperare PF; si ricaricano le risorse "a riposo breve".'),
       h('div.riga-btn',
         h('button.btn', { onclick: () => chiudi() }, 'Non ora'),
         h('button.btn.primario', { onclick: () => {
@@ -755,7 +755,7 @@ export function inviaAzione(destId, azione) {
 
 function descriviAzione(az, da, chi, prima, dopo) {
   const motivo = az.motivo ? ` (${az.motivo})` : '';
-  if (az.tipo === 'danno') return `${da} → ${chi}: ${az.valore} danni${motivo} · PF ${prima.att} → ${dopo.att}`;
+  if (az.tipo === 'danno') return `${da} → ${chi}: ${az.valore} danni${az.critico ? ' (critico)' : ''}${motivo} · PF ${prima.att} → ${dopo.att}`;
   if (az.tipo === 'cura') return `${da} cura ${chi}: +${dopo.att - prima.att} PF${motivo} · PF ${prima.att} → ${dopo.att}`;
   if (az.tipo === 'pftemp') return `${da} dà ${az.valore} PF temporanei a ${chi}${motivo}`;
   if (az.tipo === 'condizione') return az.attiva ? `${da}: ${chi} ora è ${nomeCondizione(az.id)}${motivo}` : `${da}: ${chi} non è più ${nomeCondizione(az.id)}${motivo}`;
@@ -784,10 +784,10 @@ function applicaAzione(m) {
   const prima = { pf: { ...stato.pg.pf }, condizioni: [...stato.pg.condizioni], tsMorte: { ...stato.pg.tsMorte },
     pe: stato.pg.pe, ispirazione: stato.pg.ispirazione, monete: { ...stato.pg.monete }, livello: stato.pg.livello,
     effetti: structuredClone(stato.pg.effetti || []), sfinimento: stato.pg.sfinimento };
-  let idOggetto = null;
+  let idOggetto = null; let esito = {};
   modifica((x) => {
     const v = Math.max(0, Number(az.valore) || 0);
-    if (az.tipo === 'danno') applicaPF(x, -v);
+    if (az.tipo === 'danno') esito = applicaPF(x, -v, { critico: !!az.critico });
     else if (az.tipo === 'cura') applicaPF(x, v);
     else if (az.tipo === 'pftemp') x.pf.temp = Math.max(x.pf.temp || 0, v);
     else if (az.tipo === 'condizione') {
@@ -817,7 +817,9 @@ function applicaAzione(m) {
   pubblicaStato({ annota: false });
   aggiungiVoce(testo, { tipo: az.tipo === 'condizione' ? 'condizione' : az.tipo === 'danno' ? 'danno' : az.tipo === 'effetto' || az.tipo === 'fineEffetto' ? 'livello' : 'pf' });
   if (az.tipo === 'fineEffetto') { avviso(testo); return; }   // la fine di un effetto non si annulla
-  if (az.tipo === 'danno') E.controllaConcentrazione(Math.max(0, Number(az.valore) || 0));
+  // Incapacitato (o a 0 PF) perde la concentrazione; altrimenti un danno chiede il TS di concentrazione
+  const persaConc = (az.tipo === 'danno' || az.tipo === 'condizione') && E.controllaIncapacitato(R.CONDIZIONI.find((c) => c.id === az.id)?.nome);
+  if (az.tipo === 'danno' && !persaConc) E.controllaConcentrazione(Math.max(0, Number(az.valore) || 0));
   if (az.tipo === 'danno') {
     document.body.classList.remove('colpito'); void document.body.offsetWidth; document.body.classList.add('colpito');
     vibra([40, 30, 40]);
@@ -836,7 +838,7 @@ function applicaAzione(m) {
     pubblicaStato({ annota: false });
     aggiungiVoce(`${stato.pg.nome} annulla: ${testo}`, { tipo: 'annulla' });
   }, az.tipo === 'danno' ? 'danno' : '');
-  if (az.tipo === 'danno' && stato.pg.pf.att <= 0) setTimeout(() => avviso('Sei a 0 PF: effettua i tiri salvezza contro la morte!', 'errore'), 1200);
+  if (az.tipo === 'danno' && (esito.morte || stato.pg.pf.att <= 0)) setTimeout(() => avvisaMorte(esito, stato.pg), 1200);
 }
 
 // Avviso con un pulsante (es. Annulla), resta qualche secondo in più

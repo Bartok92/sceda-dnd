@@ -31,7 +31,8 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 export const CATALOGO = [
   // Trucchetti
-  D(['guida', 'guidance'], 0, { conc: true, durata: '1 minuto', testo: '+1d4 alla prossima prova di caratteristica', effetto: () => ({ mod: { provaDado: '1d4' }, usi: 'prova', nota: 'Si usa alla prossima prova di caratteristica (anche di abilità), poi finisce.' }) }),
+  D(['guida', 'guidance'], 0, { conc: true, durata: '1 minuto', testo: '+1d4 alle prove dell\'abilità scelta', sceltaAbilita: true,
+    effetto: (l, p, car, ab) => ({ mod: { provaDado: '1d4', ...(ab ? { soloAbilita: ab } : {}) }, nota: `+1d4 a tutte le prove di ${R.ABILITA.find((a) => a.id === ab)?.nome || 'un\'abilità scelta'} finché dura.` }) }),
   D(['resistenza', 'resistance'], 0, { conc: true, durata: '1 minuto', testo: 'Riduce di 1d4 i danni del tipo scelto', effetto: () => ({ nota: 'Quando subisci danni del tipo scelto, riducili di 1d4 (una volta per turno).' }) }),
   D(['salvare i morenti', 'risparmiare i morenti', 'stabilizzare', 'spare the dying'], 0, { nome: 'Salvare i morenti', bersagli: 'altri', speciale: 'stabilizza', testo: 'Una creatura a 0 PF diventa stabile' }),
   // 1° livello
@@ -69,8 +70,8 @@ export const CATALOGO = [
     effetto: () => ({ nota: 'Vantaggio ai TS per non essere Avvelenato e resistenza ai danni da veleno.' }) }),
   D(['legame protettivo', 'legame di interdizione', 'warding bond'], 2, { nome: 'Legame protettivo', bersagli: 'altri', durata: '1 ora', testo: '+1 CA e TS, resistenza a tutti i danni',
     effetto: (l, p) => ({ mod: { ca: 1, ts: 1 }, nota: `Resistenza a tutti i danni; ${p.nome} subisce gli stessi danni che subisci tu.` }) }),
-  D(['arma magica', 'magic weapon'], 2, { durata: '1 ora', testo: '+1 per colpire e ai danni con un\'arma (+2 dal 4°, +3 dal 6°)',
-    effetto: (l) => { const b = l >= 6 ? 3 : l >= 4 ? 2 : 1; return { mod: { attacco: b, danni: b }, nota: 'Vale per l\'arma toccata.' }; } }),
+  D(['arma magica', 'magic weapon'], 2, { durata: '1 ora', testo: '+1 per colpire e ai danni con un\'arma (+2 con slot dal 3° al 5°, +3 dal 6°)',
+    effetto: (l) => { const b = l >= 6 ? 3 : l >= 3 ? 2 : 1; return { mod: { attacco: b, danni: b }, nota: 'Vale per l\'arma toccata.' }; } }),
   // 3° livello
   D(['velocita', 'haste'], 3, { nome: 'Velocità', conc: true, durata: '1 minuto', testo: '+2 CA, velocità doppia e un\'azione in più',
     effetto: () => ({ mod: { ca: 2, velocitaX: 2 }, nota: 'Vantaggio ai TS su Destrezza e un\'azione in più a turno (un solo attacco, Disimpegno, Nascondersi, Scatto o Usare un oggetto). Quando finisce, per un turno non puoi muoverti né agire.' }) }),
@@ -112,7 +113,7 @@ export function privilegiDisponibili(pg) {
   const out = [];
   const pal = livelloClasse(pg, 'Paladino'), bar = livelloClasse(pg, 'Bardo'), gue = livelloClasse(pg, 'Guerriero'), bb = livelloClasse(pg, 'Barbaro');
   if (pal) out.push({ id: 'imposizione', nome: 'Imposizione delle mani', testo: 'Cura te o un compagno con la tua riserva di PF (5 punti per togliere Avvelenato)', risorsa: risorsaDi(pg, 'imposizione', ['imposizione']) });
-  if (pal >= 6) out.push({ id: 'aura', nome: 'Aura di protezione', testo: `+${Math.max(1, R.mod(pg.car.CAR))} ai tiri salvezza dei compagni entro ${pal >= 18 ? 9 : 3} m` });
+  if (pal >= 6) out.push({ id: 'aura', nome: 'Aura di protezione', testo: `+${Math.max(1, R.mod(pg.car.CAR))} ai tiri salvezza dei compagni entro ${pal >= 18 ? 9 : 3} m (su di te la scheda la conta già)` });
   if (bar) out.push({ id: 'ispirazione-bardica', nome: 'Ispirazione bardica', testo: `Dai a un compagno un d${bar >= 15 ? 12 : bar >= 10 ? 10 : bar >= 5 ? 8 : 6} da aggiungere a un tiro`, risorsa: risorsaDi(pg, 'ispirazione', ['ispirazione bardica']) });
   if (gue) out.push({ id: 'secondo-fiato', nome: 'Secondo fiato', testo: `Recuperi 1d10+${gue} PF (solo su di te)`, risorsa: risorsaDi(pg, 'secondo-fiato', ['secondo fiato', 'recuperare energie']) });
   if (bb) out.push({ id: 'ira', nome: 'Ira', testo: `+${bb >= 16 ? 4 : bb >= 9 ? 3 : 2} danni con la Forza e resistenze (solo su di te)`, risorsa: risorsaDi(pg, 'ira', ['ira']) });
@@ -160,7 +161,7 @@ export function sommario(e) {
   if (m.attaccoDado) s.push(`+${m.attaccoDado} per colpire`);
   if (m.danni) s.push(`${R.segno(m.danni)} danni`);
   if (m.danniDado) s.push(`+${m.danniDado} danni`);
-  if (m.provaDado) s.push(`+${m.provaDado} a una prova`);
+  if (m.provaDado) s.push(`+${m.provaDado} ${m.soloAbilita ? 'a ' + (R.ABILITA.find((a) => a.id === m.soloAbilita)?.nome || m.soloAbilita) : 'a una prova'}`);
   if (m.pfMax) s.push(`+${m.pfMax} PF massimi`);
   if (m.velocita) s.push(`+${String(m.velocita).replace('.', ',')} m velocità`);
   if (m.velocitaX > 1) s.push(`velocità ×${m.velocitaX}`);
@@ -172,10 +173,10 @@ export function sommario(e) {
 
 // ───────────────────────── Tiri con i dadi degli effetti ─────────────────────────
 // ambito: 'attacco' | 'ts' | 'prova' | 'danni'. Gli effetti "a un uso" (es. Guida) finiscono dopo il tiro.
-export function tiraCon(expr, etichetta, ambito, opz = {}, { critico = false } = {}) {
+export function tiraCon(expr, etichetta, ambito, opz = {}, { critico = false, abilita = null } = {}) {
   const p = stato.pg;
-  const extra = p ? R.dadiEffetti(p, ambito) : '';
-  const nomi = p ? R.effettiConDadi(p, ambito).map((e) => e.nome) : [];
+  const extra = p ? R.dadiEffetti(p, ambito, abilita) : '';
+  const nomi = p ? R.effettiConDadi(p, ambito, abilita).map((e) => e.nome) : [];
   let e = String(expr) + extra;
   if (critico) e = e.replace(/(\d*)d(\d+)/g, (_, n, f) => `${(Number(n) || 1) * 2}d${f}`);
   const r = tira(e, etichetta + (nomi.length ? ` (+ ${nomi.join(', ')})` : ''), opz);
@@ -203,6 +204,16 @@ export async function finisciConcentrazione({ chiedi = false, motivo = '' } = {}
   modifica((x) => { x.concentrazione = null; });
   if (nonAvvisati.length) avviso(`Avvisa ${nonAvvisati.join(', ')}: ${c.nome} è finito (non sei collegato al tavolo).`, 'errore');
   else avviso(`${c.nome}: concentrazione terminata${motivo ? ' (' + motivo + ')' : ''}`);
+  return true;
+}
+
+// Regole 2024: chi ha la condizione Incapacitato (anche Paralizzato, Pietrificato, Privo di sensi, Stordito; e chi
+// scende a 0 PF, perché cade Privo di sensi) perde la concentrazione. Si può spegnere tra le Regole automatiche.
+export function controllaIncapacitato(motivo = 'Incapacitato') {
+  const p = stato.pg;
+  if (!p?.concentrazione || !R.automatico(p, 'concentrazione-incapacitato')) return false;
+  if (!R.incapacitato(p) && p.pf.att > 0) return false;
+  finisciConcentrazione({ motivo: p.pf.att > 0 ? motivo : '0 PF' });
   return true;
 }
 
@@ -263,7 +274,7 @@ export async function lanciaSu(def, liv, { nome = def.nome, conc = def.conc, dur
   const max = Math.max(1, def.max?.(liv, p) || 1);
   const opzioni = [...(def.bersagli !== 'altri' ? [io] : []), ...(def.bersagli !== 'se' ? compagni : [])];
   const scelti = new Set(def.bersagli === 'se' ? [io.id] : []);
-  let car = 'Forza', condizioniDaTogliere = new Set(), sfinimento = false;
+  let car = 'Forza', abilita = null, condizioniDaTogliere = new Set(), sfinimento = false;
   const esprCura = def.cura?.(liv, p) || def.pfTemp?.(liv, p) || '';
   pannello(`✦ ${nome}`, (c, chiudi) => {
     const zona = h('div.lancia-su');
@@ -281,6 +292,7 @@ export async function lanciaSu(def, liv, { nome = def.nome, conc = def.conc, dur
       }, b.id === io.id ? `${b.nome} (tu)` : b.nome, b.id !== io.id && !b.presente ? h('small', ' · non collegato') : null))),
       !alTavolo && def.bersagli !== 'se' ? h('p.nota', 'Per lanciarlo su un compagno collegatevi al tavolo di gioco (icona in alto nella scheda).') : null,
       def.sceltaCar ? h('div.chips', R.CARATTERISTICHE.map((cr) => h('button.chip' + (car === cr.nome ? '.attivo' : ''), { onclick: () => { car = cr.nome; disegna(); } }, cr.nome))) : null,
+      def.sceltaAbilita ? h('div', h('h4.sottotitolo', 'Quale abilità?'), h('div.chips.piccoli', R.ABILITA.map((ab) => h('button.chip' + (abilita === ab.id ? '.attivo' : ''), { onclick: () => { abilita = ab.id; disegna(); } }, ab.nome)))) : null,
       def.speciale === 'rimuoviCondizione' ? h('div',
         h('h4.sottotitolo', 'Cosa togliere'),
         h('div.chips', def.condizioni.map((id) => h('button.chip' + (condizioniDaTogliere.has(id) ? '.attivo' : ''), { onclick: () => { condizioniDaTogliere.has(id) ? condizioniDaTogliere.delete(id) : condizioniDaTogliere.add(id); disegna(); } }, nomeCond(id))),
@@ -288,8 +300,9 @@ export async function lanciaSu(def, liv, { nome = def.nome, conc = def.conc, dur
       esprCura ? h('label.campo-ctr', h('span.etichetta', def.cura ? 'Punti ferita curati (dadi da tirare)' : 'PF temporanei (dadi da tirare)'), inpDadi) : null,
       h('button.btn.grande.primario', { onclick: async () => {
         if (!scelti.size) return avviso('Scegli almeno un bersaglio', 'errore');
+        if (def.sceltaAbilita && !abilita) return avviso('Scegli l\'abilità', 'errore');
         chiudi();
-        await applica(def, liv, [...scelti], { nome, conc, durata, car, condizioni: [...condizioniDaTogliere], sfinimento, dadi: inpDadi.value.trim(), io, compagni });
+        await applica(def, liv, [...scelti], { nome, conc, durata, car, abilita, condizioni: [...condizioniDaTogliere], sfinimento, dadi: inpDadi.value.trim(), io, compagni });
       } }, `✦ Lancia${scelti.size ? ' su ' + [...scelti].map((id) => opzioni.find((b) => b.id === id)?.nome).join(', ') : ''}`));
     disegna();
     c.append(zona);
@@ -298,7 +311,7 @@ export async function lanciaSu(def, liv, { nome = def.nome, conc = def.conc, dur
 
 function creaEffetto(def, liv, extra, bersaglio) {
   const p = stato.pg;
-  const base = def.effetto?.(liv, p, extra.car) || {};
+  const base = def.effetto?.(liv, p, extra.car, extra.abilita) || {};
   return { id: nuovoId(), nome: extra.nome, da: { id: p.id, nome: p.nome }, conc: !!extra.conc, durata: extra.durata || '', t: Date.now(),
     mod: base.mod || {}, nota: base.nota || '', condizione: base.condizione || null, usi: base.usi || null, dadoLibero: base.dadoLibero || null, a: bersaglio };
 }
@@ -417,13 +430,18 @@ async function imposizioneDelleMani(pr) {
           if (scelto === p.id) { modifica((x) => curaLocale(x, v)); consumaRisorsa(r, v); avviso(`+${v} PF`); }
           else if (T.inviaAzione(scelto, { tipo: 'cura', valore: v, motivo: 'Imposizione delle mani' })) { consumaRisorsa(r, v); avviso('Cura inviata'); }
         } }, '✚ Cura'),
-        h('button.btn.grande', { onclick: async () => {
+      ),
+      // Togliere condizioni: 5 punti della riserva ciascuna. Avvelenato sempre; dal 14° livello (Tocco ristoratore)
+      // anche Accecato, Affascinato, Assordato, Spaventato, Paralizzato e Stordito.
+      h('h4.sottotitolo', 'Togli una condizione (5 punti)'),
+      h('div.chips', ['avvelenato', ...(livelloClasse(p, 'Paladino') >= 14 ? ['accecato', 'affascinato', 'assordato', 'spaventato', 'paralizzato', 'stordito'] : [])].map((cond) =>
+        h('button.chip', { onclick: async () => {
           if (disp < 5) return avviso('Servono 5 punti della riserva', 'errore');
           chiudi();
           const T = await tavolo();
-          if (scelto === p.id) { modifica((x) => { x.condizioni = x.condizioni.filter((c2) => c2 !== 'avvelenato'); }); consumaRisorsa(r, 5); }
-          else if (T.inviaAzione(scelto, { tipo: 'rimuoviCondizione', condizioni: ['avvelenato'], motivo: 'Imposizione delle mani' })) consumaRisorsa(r, 5);
-        } }, 'Togli Avvelenato (5)')));
+          if (scelto === p.id) { modifica((x) => { x.condizioni = x.condizioni.filter((c2) => c2 !== cond); }); consumaRisorsa(r, 5); }
+          else if (T.inviaAzione(scelto, { tipo: 'rimuoviCondizione', condizioni: [cond], motivo: 'Imposizione delle mani' })) consumaRisorsa(r, 5);
+        } }, nomeCond(cond)))));
     setTimeout(() => quanti.focus(), 250);
   }, { classe: 'stretto' });
 }

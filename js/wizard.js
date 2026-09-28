@@ -4,7 +4,7 @@ import { personaggioVuoto } from './stato.js';
 import { nuovoId } from './db.js';
 import * as R from './regole.js';
 import { esegui } from './dadi.js';
-import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE } from './dati2024.js';
+import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE, COSTO_PUNTI, PUNTI_DISPONIBILI } from './dati2024.js';
 import { oggettoDaArma } from './zaino.js';
 import { sigillo } from './icone.js';
 
@@ -17,6 +17,7 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   pg.nome = ''; pg.razza = 'Umano'; pg.background = '';
   let passo = 0;
   let aumenti = null; // { FOR: 2, COS: 1 } dal background
+  let aPunti = false;  // acquisto a punti attivo (27 punti)
   const PASSI = ['Chi sei', 'Classe', 'Caratteristiche', 'Abilità', 'Riepilogo'];
   const bg = () => BACKGROUND.find((b) => b.nome === pg.background) || null;
   const totale = (id) => Math.min(20, pg.car[id] + (aumenti?.[id] || 0));
@@ -130,13 +131,25 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   function passoCar(c) {
     const b = bg();
     const griglia = h('div.car-griglia.wizard-car');
-    const disegnaCar = () => griglia.replaceChildren(...R.CARATTERISTICHE.map((cr) => h('div.car-box.modifica',
-      h('div.car-tocca', h('small', cr.nome), h('strong', R.segno(R.mod(totale(cr.id)))), h('span.car-punteggio', totale(cr.id)),
-        aumenti?.[cr.id] ? h('span.badge.verde', '+' + aumenti[cr.id]) : null,
-        R.CLASSI[pg.classe].ts.includes(cr.id) ? h('span.badge.oro', 'TS') : null),
-      contatore(pg.car[cr.id], (v) => { pg.car[cr.id] = v; disegnaCar(); }, { min: 3, max: 20 }))));
+    const infoPunti = h('p.nota');
+    // Acquisto a punti (regole 2024): 27 punti, ogni punteggio da 8 a 15 prima degli aumenti del background
+    const spesi = () => R.CARATTERISTICHE.reduce((t, cr) => t + (COSTO_PUNTI[pg.car[cr.id]] ?? 99), 0);
+    const disegnaCar = () => {
+      griglia.replaceChildren(...R.CARATTERISTICHE.map((cr) => h('div.car-box.modifica',
+        h('div.car-tocca', h('small', cr.nome), h('strong', R.segno(R.mod(totale(cr.id)))), h('span.car-punteggio', totale(cr.id)),
+          aumenti?.[cr.id] ? h('span.badge.verde', '+' + aumenti[cr.id]) : null,
+          R.CLASSI[pg.classe].ts.includes(cr.id) ? h('span.badge.oro', 'TS') : null),
+        contatore(pg.car[cr.id], (v) => {
+          const prima = pg.car[cr.id]; pg.car[cr.id] = v;
+          if (aPunti && spesi() > PUNTI_DISPONIBILI) { pg.car[cr.id] = prima; avviso(`Hai solo ${PUNTI_DISPONIBILI} punti`, 'errore'); }
+          disegnaCar();
+        }, aPunti ? { min: 8, max: 15 } : { min: 3, max: 20 }))));
+      infoPunti.textContent = aPunti ? `Acquisto a punti: spesi ${spesi()} su ${PUNTI_DISPONIBILI}. Costi: 8=0, 9=1, 10=2, 11=3, 12=4, 13=5, 14=7, 15=9. Tocca di nuovo «A punti (27)» per regolarli liberamente.` : '';
+      infoPunti.hidden = !aPunti;
+    };
     disegnaCar();
     const assegna = (valori) => {
+      aPunti = false;
       // Assegna i valori migliori alle caratteristiche più utili per la classe
       const cl = R.CLASSI[pg.classe];
       const priorita = [...new Set([cl.carMagia, ...cl.ts, 'COS', 'DES', 'FOR', 'SAG', 'INT', 'CAR'].filter(Boolean))];
@@ -160,11 +173,13 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
       h('p.nota', 'Scegli un metodo oppure regola i punteggi a mano con − e +. Il massimo alla creazione è 20.'),
       h('div.riga-btn',
         h('button.btn', { onclick: () => assegna(R.MATRICE_STANDARD) }, 'Serie standard'),
+        h('button.btn', { onclick: () => { aPunti = !aPunti; if (aPunti) R.CARATTERISTICHE.forEach((cr) => (pg.car[cr.id] = 8)); disegnaCar(); } }, 'A punti (27)'),
         h('button.btn', { onclick: () => {
           const tiri = Array.from({ length: 6 }, () => { const r = esegui('4d6').parti[0].valori.sort((a, b2) => b2 - a); return r[0] + r[1] + r[2]; });
           assegna(tiri); avviso('Tirati: ' + tiri.join(', '));
         } }, '🎲 Tira 4d6')),
       b ? campo(`Aumenti del background (${b.nome})`, selAumenti) : h('p.nota', 'Con un background del manuale l\'app ti fa scegliere gli aumenti di caratteristica (+2/+1).'),
+      infoPunti,
       griglia);
   }
 

@@ -2,6 +2,7 @@
 import { db, nuovoId } from './db.js';
 import * as R from './regole.js';
 import { TALENTI_ORIGINE } from './dati2024.js';
+import { INCANTESIMI_BASE, DESCRIZIONI_2014 } from './incantesimi-base.js';
 
 export const stato = { pg: null, tab: 'eroe' };
 const ascoltatori = new Set();
@@ -46,6 +47,7 @@ export function personaggioVuoto() {
     condizioni: [], sfinimento: 0,
     risorse: [], tratti: [], competenzeAltre: '', note: '',
     talenti: [], maestrie: [],   // talenti con effetto automatico; armi di cui si usa la maestria (id del manuale)
+    automatismiOff: [],          // regole automatiche spente a mano (vedi R.AUTOMATISMI)
     modelli: [], animazione: '', tema: '',   // tema: '' = segue il tema generale
     effetti: [], concentrazione: null,       // effetti ricevuti (Scudo della fede…) e concentrazione di chi lancia (effetti.js)
     storicoDadi: [],
@@ -66,6 +68,32 @@ function aggiorna2024(pg) {
     }
     pg._talentiControllati = true;
   }
+  // Versione 1.10.0: riconosce anche Rissaiolo e Iniziato alla magia già scritti nei tratti
+  if (!pg._talentiControllati110) {
+    const titoli = pg.tratti.map((t) => t.titolo.toLowerCase());
+    for (const id of ['rissaiolo', 'iniziato-alla-magia']) {
+      const nome = TALENTI_ORIGINE[id].nome.toLowerCase();
+      if (titoli.some((t) => t === nome || t.startsWith(nome + ' ')) && !pg.talenti.includes(id)) pg.talenti.push(id);
+    }
+    pg._talentiControllati110 = true;
+  }
+  // Versione 1.10.0: l'Aura di protezione sul paladino ora è automatica. Chi l'aveva già scritta a mano nel
+  // "Bonus a tutti i tiri salvezza" non deve contarla due volte: se era proprio quel valore la togliamo,
+  // altrimenti spegniamo l'automatismo e il suo bonus resta com'era.
+  if (!pg._aura110) {
+    const aura = R.livelloDiClasse(pg, 'Paladino') >= 6 ? Math.max(1, R.mod(pg.car.CAR)) : 0;
+    const scritto = Number(pg.bonusTiriSalvezza) || 0;
+    if (aura && scritto === aura) pg.bonusTiriSalvezza = 0;
+    else if (aura && scritto > 0 && !pg.automatismiOff.includes('aura-protezione')) pg.automatismiOff.push('aura-protezione');
+    pg._aura110 = true;
+  }
+  // Incantesimi presi dal vecchio prontuario (regole 2014) e mai modificati: passano alle regole 2024
+  pg.incantesimi.forEach((inc) => {
+    if (DESCRIZIONI_2014[inc.nome] == null || inc.descrizione !== DESCRIZIONI_2014[inc.nome]) return;
+    const nuovo = INCANTESIMI_BASE.find((b) => b.nome === inc.nome);
+    if (nuovo) Object.assign(inc, { livello: nuovo.livello, scuola: nuovo.scuola, tempo: nuovo.tempo, gittata: nuovo.gittata, componenti: nuovo.componenti,
+      durata: nuovo.durata, descrizione: nuovo.descrizione, concentrazione: nuovo.concentrazione });
+  });
   if (!pg._maestrieControllate) {
     const max = R.maestrieMax(pg);
     if (max && !pg.maestrie.length) pg.maestrie = [...new Set(pg.attacchi.map((a) => a.arma).filter((id) => id && R.armaDaId(id)?.maestria))].slice(0, max);

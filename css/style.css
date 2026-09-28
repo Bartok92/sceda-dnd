@@ -853,7 +853,7 @@ button.stat-box:active { transform: scale(.96); }
 .tast-griglia { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .tasto { min-height: 58px; border-radius: 13px; background: var(--tasto-bg); border: 1px solid var(--tasto-bordo); font: 700 1.55rem var(--font-titoli); color: var(--tasto-testo); box-shadow: 0 2px 0 var(--tasto-bordo), 0 3px 8px rgba(0, 0, 0, .15); }
 .tasto:active { transform: translateY(2px); box-shadow: none; filter: brightness(.9); }
-.tast-azioni { display: grid; grid-auto-flow: column; gap: 8px; margin-top: 14px; }
+.tast-azioni { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin-top: 14px; }
 
 /* Cursori regolazione e versioni del modello */
 .riga-cursore { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
@@ -1344,3 +1344,11 @@ button.stat-box:active { transform: scale(.96); }
 .lancia-su .chip small { opacity: .75; }
 .comp-chip.effetto { background: linear-gradient(135deg, #6b3cc9, #2f6fd0); }
 .comp-chip.conc { background: var(--oro-scuro, #9a7028); }
+
+/* Privilegi di classe per livello (regole 2024) */
+.lista-privilegi { margin: 6px 0 0; padding-left: 20px; color: var(--testo); }
+.lista-privilegi li { margin: 2px 0; }
+.tabella-privilegi { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.riga-privilegio { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--linea); color: var(--testo); }
+.riga-privilegio .liv { font: 700 .95rem var(--font-titoli); color: var(--titolo); text-align: right; }
+.riga-privilegio.futuro { opacity: .5; }

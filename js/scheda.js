@@ -7,7 +7,7 @@ import { tira, selettoreModo } from './dadi.js';
 import { ico } from './icone.js';
 import { INCANTESIMI_BASE } from './incantesimi-base.js';
 import * as E from './effetti.js';
-import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento } from './dati2024.js';
+import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento, privilegiAlLivello, PRIVILEGI_LIVELLO } from './dati2024.js';
 
 const pg = () => stato.pg;
 const num = (v, d = 0) => (v === '' || v == null || isNaN(Number(v)) ? d : Number(v));
@@ -81,11 +81,13 @@ function saliDiLivello() {
         chiudi(); avviso(`Ora sei di livello ${p.livello} (${cl.classe} ${cl.livello + 1})! +${pf} PF massimi`);
         if (cambiate.length) setTimeout(() => avviso('Risorse aggiornate: ' + cambiate.join(', ')), 1200);
       };
+      const nuovi = privilegiAlLivello(cl.classe, cl.livello + 1);
       c.replaceChildren(h('p', `${cl.classe} ${cl.livello} → ${cl.livello + 1}. Aumenta i punti ferita massimi: dado vita d${dv} ${R.segno(m)} (Costituzione)${extra ? ` ${R.segno(extra)} (talenti/specie)` : ''}.`),
         h('div.riga-btn',
           h('button.btn.grande', { onclick: () => applica(media) }, `Usa la media (+${media})`),
           h('button.btn.grande.primario', { onclick: () => { const r = tira(`1d${dv}`, 'Dado vita (livello)'); applica(Math.max(1, r.totale + m) + extra); } }, `Tira 1d${dv}`)),
-        h('p.nota', 'Ricordati di controllare i nuovi privilegi di classe e, se sei un incantatore, i nuovi incantesimi. Gli slot incantesimo si aggiornano da soli.'));
+        nuovi.length ? h('div.box-info', h('strong', `Al ${cl.livello + 1}° livello da ${cl.classe} ottieni:`), h('ul.lista-privilegi', nuovi.map((n) => h('li', n)))) : null,
+        h('p.nota', 'Scrivi i nuovi privilegi nei Tratti (Eroe) e, se sei un incantatore, scegli i nuovi incantesimi. Slot, risorse e automatismi si aggiornano da soli.'));
     };
     const classi = R.elencoClassi(p);
     if (classi.length === 1) return scegliPF(classi[0]);
@@ -122,6 +124,7 @@ export function apriModificaBase() {
           if (q.livello >= 20) return avviso('Sei già al livello 20.', 'errore');
           cambiaMulti((l) => l.push({ id: nuovoId(), classe: 'Guerriero', sottoclasse: '', livello: 1, dvRimasti: 1 })); disegnaMulti();
         } }, '+ Aggiungi un\'altra classe'),
+        lista.length && R.requisitiMulticlasse(q).length ? h('p.nota.rosso', 'Requisiti del multiclasse (regole 2024): serve almeno 13 nella caratteristica principale di ogni tua classe. Manca: ' + R.requisitiMulticlasse(q).join('; ') + '. Puoi tenerla lo stesso se il Master è d\'accordo.') : null,
         lista.length ? h('p.nota', `Livello totale ${q.livello}: ${R.testoClassi(q, { sottoclassi: false })}. Il bonus di competenza (${R.segno(R.competenza(q.livello))}) usa il livello totale. Se hai aggiunto livelli, ricordati i PF massimi (puoi usare "Ricalcola PF massimi").`) : null);
     }
     disegnaMulti();
@@ -149,13 +152,26 @@ export function apriModificaBase() {
         campo('Velocità (m)', inputNum(p.velocita, (v) => agg((x) => (x.velocita = v)), { step: 1.5 })),
         campo('Bonus iniziativa extra', inputNum(p.iniziativaBonus, (v) => agg((x) => (x.iniziativaBonus = v))))),
       campo('Bonus a tutti i tiri salvezza', inputNum(p.bonusTiriSalvezza || 0, (v) => agg((x) => (x.bonusTiriSalvezza = v)))),
-      h('p.nota', 'Il bonus ai tiri salvezza serve per effetti sempre attivi, come l\'Aura di protezione del paladino (+ mod. Carisma, min. +1).'),
+      h('p.nota', 'Il bonus ai tiri salvezza serve per effetti sempre attivi (es. un anello di protezione). L\'Aura di protezione del paladino la calcola già l\'app: vedi Regole automatiche qui sotto.'),
       h('span.etichetta', 'Talenti con effetto automatico'),
       h('div.chips.piccoli', R.TALENTI_AUTOMATICI.map((id) => h('button.chip' + (p.talenti?.includes(id) ? '.attivo' : ''), { onclick: (e) => {
         e.currentTarget.classList.toggle('attivo');
         agg((x) => { x.talenti = (x.talenti || []).includes(id) ? x.talenti.filter((t) => t !== id) : [...(x.talenti || []), id]; });
       } }, TALENTI_ORIGINE[id].nome))),
-      h('p.nota', 'Robusto: +2 PF massimi per livello (conta in "Ricalcola PF" e quando sali di livello). Allerta: + competenza all\'iniziativa. Fortunato: aggiunge i Punti fortuna alle risorse (Combatti → Dal manuale).'),
+      h('p.nota', 'Robusto: +2 PF massimi per livello (conta in "Ricalcola PF" e quando sali di livello). Allerta: + competenza all\'iniziativa. Fortunato: aggiunge i Punti fortuna alle risorse (Combatti → Dal manuale). Rissaiolo: il colpo senz\'armi fa 1d4. Iniziato alla magia: aggiunge l\'uso gratuito dell\'incantesimo di 1° livello alle risorse.'),
+      h('span.etichetta', 'Regole automatiche'),
+      (() => {
+        const lista = R.automatismiDelPg(p);
+        if (!lista.length) return h('p.nota', 'Per ora nessuna regola automatica riguarda questo personaggio (compaiono salendo di livello o scegliendo specie e classe).');
+        return h('div', h('p.nota', 'Regole del manuale 2024 che l\'app applica da sola. Tocca per spegnerne una se il vostro gruppo gioca diversamente (o per riaccenderla).'),
+          lista.map((a) => {
+            const acceso = !(p.automatismiOff || []).includes(a.id);
+            return h('label.check', h('input', { type: 'checkbox', checked: acceso, onchange: (e) => agg((x) => {
+              x.automatismiOff = (x.automatismiOff || []).filter((id) => id !== a.id);
+              if (!e.target.checked) x.automatismiOff.push(a.id);
+            }) }), h('span', h('strong', a.nome), h('small', ` · ${a.fonte}. ${a.testo}`)));
+          }));
+      })(),
       h('p.nota', 'Tutto viene salvato automaticamente sul telefono.'));
   });
 }
@@ -194,33 +210,55 @@ export function renderVita(c) {
   document.body.dataset.vita = livelloPF;
 }
 
-export function applicaPF(x, delta) {
+// Danni e cure (regole 2024). Restituisce { morte: true } se il danno uccide sul colpo:
+// - danno massiccio: scendi a 0 PF e il danno che avanza è pari o superiore ai PF massimi;
+// - a 0 PF: ogni danno è un fallimento nei TS contro la morte (2 se è un colpo critico), e muori se il danno
+//   è pari o superiore ai PF massimi. La morte segna 3 fallimenti: si possono sempre togliere a mano.
+export function applicaPF(x, delta, { critico = false } = {}) {
+  const esito = { morte: false };
   if (delta < 0) {
     let danno = -delta;
     const assorbito = Math.min(x.pf.temp, danno);
     x.pf.temp -= assorbito; danno -= assorbito;
-    if (x.pf.att <= 0 && danno > 0) x.tsMorte.fall = Math.min(3, x.tsMorte.fall + 1);
+    if (danno <= 0) return esito;
+    if (x.pf.att <= 0) {
+      if (danno >= x.pf.max) esito.morte = true;
+      else x.tsMorte.fall = Math.min(3, x.tsMorte.fall + (critico ? 2 : 1));
+    } else if (danno - x.pf.att >= x.pf.max) esito.morte = true;
     x.pf.att = Math.max(0, x.pf.att - danno);
+    if (esito.morte) x.tsMorte = { succ: 0, fall: 3 };
   } else {
     if (x.pf.att <= 0 && delta > 0) x.tsMorte = { succ: 0, fall: 0 };
     x.pf.att = Math.min(x.pf.max, x.pf.att + delta);
   }
+  return esito;
 }
 
 async function apriTastierinoPF() {
+  // A 0 PF un colpo critico conta come 2 fallimenti nei TS contro la morte
+  const aTerra = pg().pf.att <= 0;
   const r = await tastierino('Danno o cura', [
-    { id: 'danno', nome: '⚔ Danno', classe: 'pericolo' }, { id: 'cura', nome: '✚ Cura', classe: 'verde' }, { id: 'temp', nome: '◈ PF temp.' }]);
+    { id: 'danno', nome: '⚔ Danno', classe: 'pericolo' },
+    aTerra ? { id: 'critico', nome: '⚔ Critico', classe: 'pericolo' } : null,
+    { id: 'cura', nome: '✚ Cura', classe: 'verde' }, { id: 'temp', nome: '◈ PF temp.' }].filter(Boolean));
   if (!r) return;
+  let esito = {};
+  const danno = r.azione === 'danno' || r.azione === 'critico';
   if (r.azione === 'temp') modifica((x) => (x.pf.temp = Math.max(x.pf.temp, r.valore)));
-  else modifica((x) => applicaPF(x, r.azione === 'danno' ? -r.valore : r.valore));
+  else modifica((x) => { esito = applicaPF(x, danno ? -r.valore : r.valore, { critico: r.azione === 'critico' }); });
   const p = pg();
-  if (r.azione === 'danno') {
+  if (danno) {
     document.body.classList.remove('colpito'); void document.body.offsetWidth; document.body.classList.add('colpito');
     vibra([40, 30, 40]);
-    if (p.pf.att <= 0) avviso('Sei a 0 PF: effettua i tiri salvezza contro la morte!', 'errore');
-    if (p.pf.att > 0 && r.valore >= p.pf.max + p.pf.att) avviso('Danno massiccio: morte istantanea secondo le regole!', 'errore');
-    E.controllaConcentrazione(r.valore);
+    avvisaMorte(esito, p);
+    if (!E.controllaIncapacitato()) E.controllaConcentrazione(r.valore);
   } else avviso(r.azione === 'cura' ? `+${r.valore} PF` : `${r.valore} PF temporanei`);
+}
+
+// Avvisi dopo un danno: morte istantanea (danno massiccio) o tiri salvezza contro la morte
+export function avvisaMorte(esito, p = pg()) {
+  if (esito?.morte) avviso('Danno massiccio: per le regole il personaggio muore sul colpo (segnati 3 fallimenti). Se il Master decide diversamente, togli i fallimenti toccando i pallini.', 'errore');
+  else if (p.pf.att <= 0) avviso(p.tsMorte.fall >= 3 ? 'Tre fallimenti: il personaggio è morto.' : 'Sei a 0 PF: effettua i tiri salvezza contro la morte!', 'errore');
 }
 
 function tiroMorte() {
@@ -255,7 +293,8 @@ export function riposoBreve({ titolo = 'Riposo breve' } = {}) {
         if (c.rimasti <= 0) return avviso(`Non hai più dadi vita d${c.dv}.`, 'errore');
         if (p.pf.att >= p.pf.max) return avviso('Hai già i PF al massimo.');
         const r = tira(`1d${c.dv}${m ? (m > 0 ? '+' : '') + m : ''}`, 'Dado vita');
-        modifica((x) => { if (c.i == null) x.dadiVita.rimasti--; else x.multiclasse[c.i].dvRimasti = c.rimasti - 1; applicaPF(x, Math.max(0, r.totale)); });
+        // Regole 2024: ogni dado vita speso fa recuperare almeno 1 PF
+        modifica((x) => { if (c.i == null) x.dadiVita.rimasti--; else x.multiclasse[c.i].dvRimasti = c.rimasti - 1; applicaPF(x, Math.max(1, r.totale)); });
         agg();
       } }, `🎲 Spendi un d${c.dv}` + (cl.length > 1 ? ` (${c.classe}, ${c.rimasti} rimasti)` : ''))));
     };
@@ -264,35 +303,38 @@ export function riposoBreve({ titolo = 'Riposo breve' } = {}) {
       info,
       bottoni,
       h('button.btn.grande.primario', { onclick: () => {
+        const instancabile = R.automatico(p, 'instancabile') && p.sfinimento > 0;
         modifica((x) => {
           x.risorse.forEach((r) => { if (r.ricarica === 'breve') r.usati = 0; else if (r.ricarica === 'breve1') r.usati = Math.max(0, r.usati - 1); });
           x.magia.pattoUsati = 0;
+          if (instancabile) x.sfinimento--;   // Ranger 10° livello (Instancabile)
         });
         E.dopoRiposo('breve');
-        chiudi(); avviso('Riposo breve completato ☾');
+        chiudi(); avviso('Riposo breve completato ☾' + (instancabile ? ' · Instancabile: −1 Sfinimento' : ''));
       } }, 'Termina il riposo breve'));
   });
 }
 
 export async function riposoLungo({ senzaConferma = false } = {}) {
-  if (!senzaConferma && !(await conferma('Riposo lungo (8 ore): PF al massimo, recuperi metà dei dadi vita, tutti gli slot incantesimo e le risorse. Procedo?', { si: 'Riposa' }))) return;
+  // Regole 2024: per iniziare un riposo lungo serve almeno 1 PF (il Master può comunque concederlo)
+  if (pg().pf.att <= 0 && !(await conferma('Per le regole serve almeno 1 punto ferita per iniziare un riposo lungo. Riposare lo stesso (se il Master lo concede)?', { si: 'Riposa lo stesso' }))) return;
+  if (!senzaConferma && !(await conferma('Riposo lungo (8 ore): PF al massimo, recuperi tutti i dadi vita, tutti gli slot incantesimo e le risorse, −1 Sfinimento. Procedo?', { si: 'Riposa' }))) return;
+  const ispira = R.automatico(pg(), 'intraprendente') && !pg().ispirazione;
   modifica((x) => {
     x.pf.att = x.pf.max; x.pf.temp = 0;
-    // recuperi metà dei dadi vita totali (minimo 1), prima quelli più grandi
-    let daRecuperare = Math.max(1, Math.floor(x.livello / 2));
-    for (const c of R.elencoClassi(x).sort((a, b) => b.dv - a.dv)) {
-      const n = Math.min(daRecuperare, c.livello - c.rimasti); if (n <= 0) continue;
-      if (c.i == null) x.dadiVita.rimasti += n; else x.multiclasse[c.i].dvRimasti = c.rimasti + n;
-      daRecuperare -= n;
+    // Regole 2024: il riposo lungo fa recuperare TUTTI i dadi vita spesi
+    for (const c of R.elencoClassi(x)) {
+      if (c.i == null) x.dadiVita.rimasti = c.livello; else x.multiclasse[c.i].dvRimasti = c.livello;
     }
     x.magia.slotUsati = new Array(9).fill(0); x.magia.pattoUsati = 0;
     x.risorse.forEach((r) => (r.usati = 0));
     x.tsMorte = { succ: 0, fall: 0 };
     if (x.sfinimento > 0) x.sfinimento--;
+    if (ispira) x.ispirazione = true;   // Umano: Intraprendente
   });
   await E.dopoRiposo('lungo');
   modifica((x) => { x.pf.att = x.pf.max; });   // dopo aver tolto gli effetti (es. Aiuto) i PF restano al massimo
-  avviso('Riposo lungo completato ☀ Sei in piena forma!');
+  avviso('Riposo lungo completato ☀ Sei in piena forma!' + (ispira ? " Intraprendente: hai l'Ispirazione eroica." : ''));
 }
 
 // ───────────────────────── Condizioni ─────────────────────────
@@ -301,7 +343,7 @@ export function renderCondizioni(c) {
   const p = pg();
   c.append(card('Condizioni',
     h('div.chips', R.CONDIZIONI.map((cd) => h('button.chip' + (p.condizioni.includes(cd.id) ? '.attivo' : ''), {
-      onclick: () => modifica((x) => { const i = x.condizioni.indexOf(cd.id); i >= 0 ? x.condizioni.splice(i, 1) : x.condizioni.push(cd.id); }),
+      onclick: () => { modifica((x) => { const i = x.condizioni.indexOf(cd.id); i >= 0 ? x.condizioni.splice(i, 1) : x.condizioni.push(cd.id); }); E.controllaIncapacitato(cd.nome); },
     }, cd.nome))),
     p.condizioni.length ? h('div.cond-desc', p.condizioni.map((id) => { const cd = R.CONDIZIONI.find((x) => x.id === id); return cd && h('p', h('strong', cd.nome + ': '), cd.desc); })) : null,
     h('div.riga-sfin', h('span.etichetta', 'Sfinimento'),
@@ -437,6 +479,7 @@ function modificaAttacco(a) {
       const vecchia = R.armaDi(att);
       Object.assign(att, R.attaccoDaArma(pg(), arma, {
         nome: nome || (!att.nome.trim() || att.nome === vecchia?.nome ? arma.nome : att.nome), bonus: att.bonus, bonusDanni: att.bonusDanni, note: att.note }));
+      att.danniManuali = false;
       disegna();
     };
     const disegna = () => {
@@ -457,7 +500,8 @@ function modificaAttacco(a) {
           campo('Caratteristica', selezione([['FOR', 'Forza'], ['DES', 'Destrezza'], ['ACC', 'FOR o DES (la migliore)'], ['MAG', 'Car. incantatore'], ['COS', 'Costituzione'], ['INT', 'Intelligenza'], ['SAG', 'Saggezza'], ['CAR', 'Carisma']], att.car, set('car'))),
           campo('Competente', selezione([['1', 'Sì'], ['0', 'No']], att.comp ? '1' : '0', (v) => set('comp')(v === '1')))),
         h('div.griglia2',
-          campo('Dadi danno', inputTesto(att.danni, set('danni'), { placeholder: '1d8' })),
+          // Se scrivi un dado diverso da quello "di regola" (Arti marziali, Rissaiolo) resta il tuo
+          campo('Dadi danno', inputTesto(R.dadoDanniAttacco(p, att), (v) => { const auto = R.dadoAutomatico(p, arma); att.danni = v; att.danniManuali = !!auto && v.trim() !== auto; agg(); }, { placeholder: '1d8' })),
           campo('Tipo di danno', inputTesto(att.tipo, set('tipo'), { list: 'tipi-danno' }))),
         h('datalist#tipi-danno', ['taglienti', 'perforanti', 'contundenti', 'fuoco', 'freddo', 'fulmine', 'acido', 'veleno', 'necrotici', 'radiosi', 'forza', 'psichici', 'tuono'].map((t) => h('option', { value: t }))),
         h('div.griglia2',
@@ -589,6 +633,7 @@ export function renderCaratteristiche(c) {
     h('button.btn.piccolo.centrato', { onclick: () => { modificaPunteggi = !modificaPunteggi; modifica(() => {}); } }, modificaPunteggi ? '✔ Fine modifica' : '✎ Modifica punteggi'),
     card('Tiri salvezza',
       Number(p.bonusTiriSalvezza) ? h('p.nota', `Include ${R.segno(Number(p.bonusTiriSalvezza))} a tutti i tiri salvezza (si cambia da Eroe → Modifica).`) : null,
+      R.auraProtezione(p) ? h('p.nota', `Include ${R.segno(R.auraProtezione(p))} dell'Aura di protezione (si spegne da ✎ Modifica → Regole automatiche).`) : null,
       R.CARATTERISTICHE.map((cr) => {
         const b = R.bonusTS(p, cr.id), ha = p.tsComp.includes(cr.id);
         return h('div.riga-abilita',
@@ -598,13 +643,14 @@ export function renderCaratteristiche(c) {
       })),
     card('Abilità',
       h('p.nota', `Tocca il pallino: ○ nessuna, ● competenza (+${comp}), ◉ maestria (+${comp * 2}). Tocca il nome per tirare.`),
+      R.bonusTuttofare(p) ? h('p.nota', `Tuttofare: +${R.bonusTuttofare(p)} già sommato alle abilità senza competenza.`) : null,
       R.ABILITA.map((ab) => {
         const l = p.abilita[ab.id] || 0, b = R.bonusAbilita(p, ab);
         return h('div.riga-abilita',
           h('button.comp.l' + l, { 'aria-label': 'Competenza', onclick: () => modifica((x) => (x.abilita[ab.id] = ((x.abilita[ab.id] || 0) + 1) % 3)) }),
-          h('button.ab-nome', { onclick: () => E.tiraCon('1d20' + fmtMod(b), `${ab.nome} (${ab.car})`, 'prova', { d20: true }) }, ab.nome, h('small', ' ' + ab.car),
+          h('button.ab-nome', { onclick: () => E.tiraCon('1d20' + fmtMod(b), `${ab.nome} (${ab.car})`, 'prova', { d20: true }, { abilita: ab.id }) }, ab.nome, h('small', ' ' + ab.car),
             ab.id === 'furtivita' && R.svantaggioFurtivita(p) ? h('span.badge.rosso', 'svantaggio') : null),
-          h('span.ab-bonus', R.segno(b)));
+          h('span.ab-bonus', R.segno(b) + R.dadiEffetti(p, 'prova', ab.id)));
       })),
     card('Altre competenze e linguaggi',
       areaTesto(p.competenzeAltre, (v) => modifica((x) => (x.competenzeAltre = v), 'silenzio'), { placeholder: 'Armi, armature, strumenti, linguaggi…' })));
@@ -798,8 +844,24 @@ export function renderNote(c) {
   c.append(
     card('Tratti e privilegi',
       p.tratti.length ? p.tratti.map((t) => h('details.tratto', h('summary', t.titolo), h('p', t.testo), h('button.btn-link', { onclick: () => modificaTratto(t) }, '✎ Modifica'))) : h('p.vuoto', 'Aggiungi i privilegi di razza e classe, i talenti, il background…'),
-      h('button.btn.aggiungi', { onclick: () => modificaTratto() }, '+ Aggiungi tratto')),
+      h('button.btn.aggiungi', { onclick: () => modificaTratto() }, '+ Aggiungi tratto'),
+      h('button.btn.piccolo', { onclick: apriPrivilegiClasse }, '📜 Privilegi di classe per livello')),
     card('Note libere', areaTesto(p.note, (v) => modifica((x) => (x.note = v), 'silenzio'), { rows: 12, placeholder: 'Storia, alleati, missioni, indizi…' })));
+}
+
+// Elenco dei privilegi di classe (tabelle del Manuale del Giocatore 2024): quelli già ottenuti e i prossimi
+function apriPrivilegiClasse() {
+  const p = pg();
+  pannello('Privilegi di classe', (c) => {
+    c.append(h('p.nota', 'Dalle tabelle delle classi del Manuale del Giocatore 2024. In chiaro quelli che hai già, in grigio i prossimi. I dettagli sono nel manuale.'));
+    for (const cl of R.elencoClassi(p)) {
+      if (!PRIVILEGI_LIVELLO[cl.classe]) continue;
+      c.append(h('h4.sottotitolo', `${cl.classe}${cl.sottoclasse ? ' (' + cl.sottoclasse + ')' : ''} · livello ${cl.livello}`),
+        h('div.tabella-privilegi', PRIVILEGI_LIVELLO[cl.classe].map((lista, i) => lista.length
+          ? h('div.riga-privilegio' + (i + 1 > cl.livello ? '.futuro' : ''), h('span.liv', i + 1), h('span', lista.join(' · ')))
+          : null)));
+    }
+  }, { pieno: true });
 }
 
 function modificaTratto(t) {

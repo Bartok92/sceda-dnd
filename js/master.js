@@ -202,6 +202,8 @@ function pannelloValore(tipo, b = bersagli()) {
   pannello(`${titoli[tipo]} a ${nomiBersagli(b)}`, (c, chiudi) => {
     const numero = h('input.campo.campo-numero.grande', { type: 'number', inputMode: 'numeric', placeholder: tipo === 'pe' ? 'quanti PE?' : 'quanti?' });
     const motivo = h('input.campo', { placeholder: tipo === 'danno' ? 'Motivo (facoltativo), es. Palla di fuoco' : tipo === 'pe' ? 'Motivo (facoltativo), es. Il drago sconfitto' : 'Motivo (facoltativo)' });
+    // Colpo critico: a chi è già a 0 PF conta come 2 fallimenti nei TS contro la morte
+    const critico = h('input', { type: 'checkbox' });
     const manda = (modo = '') => {
       let v = Number(numero.value);
       if (!v || v < 0) return avviso('Scrivi un numero', 'errore');
@@ -210,10 +212,11 @@ function pannelloValore(tipo, b = bersagli()) {
       const extra = modo === 'meta' ? 'metà danni' : modo === 'dividi' ? `diviso tra ${b.length}` : '';
       const mot = [motivo.value.trim(), extra].filter(Boolean).join(', ');
       let ok = 0;
-      for (const m of b) if (T.inviaAzione(m.id, { tipo, valore: v, motivo: mot })) ok++;
+      for (const m of b) if (T.inviaAzione(m.id, { tipo, valore: v, motivo: mot, ...(tipo === 'danno' && critico.checked ? { critico: true } : {}) })) ok++;
       if (ok) { chiudi(); vibra(20); avviso(`Inviato a ${nomiBersagli(b)}`); }
     };
     c.append(numero, motivo,
+      tipo === 'danno' ? h('label.check', critico, ' Colpo critico (a 0 PF: 2 fallimenti)') : null,
       tipo === 'danno'
         ? h('div.riga-btn', h('button.btn.grande.pericolo', { onclick: () => manda() }, '⚔ Infliggi'), h('button.btn.grande', { onclick: () => manda('meta') }, '½ Metà (TS superato)'))
         : tipo === 'pe' && b.length > 1
