@@ -13,10 +13,28 @@ import { caricaTemaGlobale, applicaTema, temaGlobale, temaPer, apriSceltaTema, p
 import * as T from './tavolo.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.6.1';
+export const VERSIONE_APP = '1.6.2';
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
 const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
+
+// iOS 26, app installata: la finestra risulta più corta dello schermo di ~60 punti (difetto di WebKit).
+// Misuro la differenza tra l'altezza vera (100lvh) e quella dichiarata e la uso per spostare giù gli elementi fissi.
+const installata = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+const misure = { fondoPerso: 0 };
+function misuraSchermo() {
+  const sonda = document.createElement('div');
+  sonda.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:100lvh;visibility:hidden;pointer-events:none';
+  document.body.append(sonda);
+  const alto = sonda.getBoundingClientRect().height;
+  sonda.remove();
+  const perso = installata() ? Math.max(0, Math.min(120, Math.round(alto - window.innerHeight))) : 0;
+  misure.fondoPerso = perso; misure.alto = Math.round(alto);
+  document.documentElement.style.setProperty('--fondo-perso', perso + 'px');
+}
+misuraSchermo();
+addEventListener('resize', () => setTimeout(misuraSchermo, 50));
+addEventListener('orientationchange', () => setTimeout(misuraSchermo, 300));
 
 const TABS = [
   { id: 'eroe', nome: 'Eroe', icona: 'eroe' },
@@ -191,6 +209,7 @@ async function apriImpostazioni() {
       })),
       h('div.card.info',
         h('p', `Modelli 3D salvati: ${files.length} (${fmtMB(files.reduce((s, f) => s + (f.dimensione || 0), 0))})`),
+        h('p.nota', `Schermo: ${innerWidth} × ${innerHeight} punti (altezza vera ${misure.alto}, recuperati ${misure.fondoPerso}) · pagina larga ${document.documentElement.scrollWidth} · scheda larga ${document.querySelector('.scheda, .master, .elenco')?.offsetWidth ?? '–'}`),
         spazio ? h('p', `Spazio usato dall'app: ${fmtMB(spazio.usage || 0)}${spazio.quota ? ' su ' + fmtMB(spazio.quota) + ' disponibili' : ''}`) : null,
         h('p', persistente ? '✔ Archivio protetto: il sistema non cancellerà i dati da solo.' : '⚠ Archivio non protetto: installa l\'app nella schermata Home e fai backup regolari.')),
       h('button.btn', { onclick: () => apriSceltaTema() }, ico('tavolozza'), `Tema grafico: ${nomeTema(temaGlobale())}`),

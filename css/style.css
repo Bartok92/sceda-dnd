@@ -225,6 +225,11 @@ h1, h2, h3, h4 { font-family: var(--font-titoli); font-weight: 700; margin: 0; l
 /* Cinzel Decorative: in minuscolo alcune coppie di lettere (es. "he") si fondono in un fregio poco leggibile → sempre in maiuscolo */
 .logo h1, .pg-nome, .wiz-testa h2, .riepilogo h2 { text-transform: uppercase; font-variant-ligatures: none; }
 #app { height: 100%; position: relative; z-index: 1; }
+/* Safari: la colonna della griglia non deve mai allargarsi oltre lo schermo */
+html, body, #app { max-width: 100%; overflow-x: hidden; }
+/* iOS 26, app installata con barra di stato trasparente: 100% e 100dvh risultano ~60 punti più corti dello schermo
+   (lo spazio resta nero in fondo). 100lvh è l'altezza vera; --fondo-perso (misurato in main.js) sposta giù gli elementi fissi. */
+@media (display-mode: standalone) { html, body { height: 100lvh; } }
 .ico { display: inline-grid; place-items: center; width: 1.3em; height: 1.3em; flex: none; vertical-align: -.25em; }
 .ico svg { width: 100%; height: 100%; overflow: visible; }
 
@@ -426,7 +431,7 @@ textarea.campo { resize: vertical; line-height: 1.5; }
 }
 
 /* ───────── Struttura della scheda ───────── */
-.scheda { height: 100%; display: grid; grid-template-rows: auto 1fr auto; }
+.scheda { height: 100%; display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); width: 100%; }
 .barra-top {
   position: relative; display: flex; align-items: center; gap: 6px;
   padding: calc(var(--sicuro-alto) + 4px) 8px 7px;
@@ -461,7 +466,7 @@ textarea.campo { resize: vertical; line-height: 1.5; }
 .tabbar button.attivo .ico { transform: translateY(-1px) scale(1.06); filter: drop-shadow(0 0 6px rgba(var(--oro-chiaro-rgb), .75)); }
 
 .fab-dadi {
-  position: fixed; right: 14px; bottom: calc(var(--tabbar) + var(--sicuro-basso) + 18px);
+  position: fixed; right: 14px; bottom: calc(var(--tabbar) + var(--sicuro-basso) + 18px - var(--fondo-perso, 0px));
   width: 56px; height: 56px; border-radius: 50%; z-index: 20;
   background: var(--fab-bg);
   border: 2px solid var(--oro-chiaro); color: #fff0c8;
@@ -807,7 +812,7 @@ button.stat-box:active { transform: scale(.96); }
 .tratto p { white-space: pre-wrap; margin: 0 0 8px; font-size: .96rem; color: var(--testo-2); -webkit-user-select: text; user-select: text; }
 
 /* ───────── Fogli di pergamena (pannelli dal basso) ───────── */
-.pannello-ctr { position: fixed; inset: 0; z-index: 50; }
+.pannello-ctr { position: fixed; inset: 0; bottom: calc(0px - var(--fondo-perso, 0px)); z-index: 50; }
 .velo { position: absolute; inset: 0; background: rgba(6, 2, 2, .62); opacity: 0; transition: opacity .25s; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
 .pannello {
   position: absolute; left: 0; right: 0; bottom: 0; max-height: 90vh; max-height: 90dvh; margin: 0 auto; max-width: 640px;
@@ -952,7 +957,7 @@ button.stat-box:active { transform: scale(.96); }
 .riep-car { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 12px; font-size: .9rem; color: var(--testo-2); }
 
 /* ───────── Avvisi e banner ───────── */
-#toasts { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar) + var(--sicuro-basso) + 92px); z-index: 70; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 16px; }
+#toasts { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar) + var(--sicuro-basso) + 92px - var(--fondo-perso, 0px)); z-index: 70; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 16px; }
 .toast {
   max-width: 480px; padding: 11px 18px; border-radius: 14px;
   background: var(--grana), var(--pietra);
@@ -1116,7 +1121,7 @@ button.stat-box:active { transform: scale(.96); }
 
 /* ═══════════════════════════ MODALITÀ MASTER ═══════════════════════════ */
 .master-btn { margin-top: 10px; }
-.master { height: 100%; display: grid; grid-template-rows: auto 1fr; position: relative; }
+.master { height: 100%; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); width: 100%; position: relative; }
 .master-scorri { overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding: 12px 0 calc(var(--sicuro-basso) + 110px); }
 .master-contenuto, .master-vuoto { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
 .master-vuoto { padding-top: 6px; }
@@ -1146,7 +1151,7 @@ button.stat-box:active { transform: scale(.96); }
 .comp-extra { display: block; margin-top: 4px; color: var(--testo-2); font-size: .78rem; }
 .comp-morte { display: block; margin-top: 3px; color: var(--pericolo-testo); font-size: .8rem; font-weight: 700; }
 
-.barra-azioni-master { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+.barra-azioni-master { position: fixed; left: 0; right: 0; bottom: calc(0px - var(--fondo-perso, 0px)); z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
   padding: 10px 10px calc(var(--sicuro-basso) + 10px); background: var(--topbar-bg); border-top: 1px solid var(--linea-forte); box-shadow: 0 -10px 30px rgba(0, 0, 0, .5);
   animation: sale .25s ease-out; }
 .barra-azioni-master .btn { padding: 10px 4px; font-size: .88rem; min-height: 46px; }
