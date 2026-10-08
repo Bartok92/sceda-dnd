@@ -32,24 +32,8 @@ window.__aptica = (ms = 10) => {
 };
 
 // ───── 2. Schermo sempre acceso al tavolo ─────
-// Su iPhone, quando lo schermo si spegne l'app si ferma e il collegamento con i compagni cade.
-// Mentre sei al tavolo (o in modalità Master) lo schermo resta acceso (Screen Wake Lock).
-let blocco = null;
-async function aggiornaSchermo() {
-  const serve = document.visibilityState === 'visible' && (T.faseTavolo() !== 'spento' || document.body.dataset.schermata === 'master');
-  if (serve && !blocco && 'wakeLock' in navigator) {
-    try {
-      blocco = await navigator.wakeLock.request('screen');
-      blocco.addEventListener('release', () => { blocco = null; });
-    } catch { blocco = null; }
-  } else if (!serve && blocco) {
-    try { await blocco.release(); } catch {}
-    blocco = null;
-  }
-}
-T.suTavolo(aggiornaSchermo);
-document.addEventListener('visibilitychange', aggiornaSchermo);
-new MutationObserver(aggiornaSchermo).observe(document.body, { attributes: true, attributeFilter: ['data-schermata'] });
+// Dalla versione 1.11.0 lo fa tavolo.js per tutte le edizioni (anche quella generica, usata su Android e da chi non
+// ha installato l'edizione iPhone): mentre sei al tavolo o in modalità Master lo schermo non si spegne.
 
 // ───── 3. Pallino sull'icona quando è il tuo turno ─────
 T.suTavolo(() => {

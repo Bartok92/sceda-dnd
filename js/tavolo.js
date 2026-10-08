@@ -15,7 +15,7 @@
 // - Il Master può chiedere tiri, concedere riposi, dare PE/oggetti/monete, scrivere (a tutti o in privato) e
 //   "mostrare" immagini e testi scegliendo chi li vede: ai giocatori arriva l'elenco aggiornato (vetrina) e le
 //   immagini viaggiano a pezzi, su richiesta, solo verso chi le può vedere.
-import { h, $, avviso, pannello, conferma, chiediTesto, vibra } from './ui.js';
+import { h, $, avviso, pannello, conferma, chiediTesto, vibra, campo } from './ui.js';
 import { db, nuovoId } from './db.js';
 import { stato, suCambio, modifica } from './stato.js';
 import * as R from './regole.js';
@@ -28,7 +28,45 @@ const PREFISSO = 'schedadnd-tavolo-';
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_REGISTRO = 800;
 const RIAPERTURA_AUTOMATICA = 14 * 3600e3;   // riaprendo l'app entro 14 ore ci si ricollega da soli
-const ERRORI_DA_RIPROVARE = ['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected'];
+const ERRORI_DA_RIPROVARE = ['network', 'server-error', 'socket-error', 'socket-closed', 'disconnected', 'webrtc'];
+// Versione dei messaggi del tavolo (dalla 1.11.0): chi ha l'app vecchia viene avvisato di aggiornarla
+const PROTOCOLLO = 2;
+// La libreria rifiuta i messaggi oltre ~16 KB (e prima l'app lo scambiava per una caduta della linea): i messaggi
+// lunghi (registro, scheda per il Master…) partono a pezzi da 4000 caratteri, che restano sotto i 16 KB anche con
+// lettere accentate, e si ricompongono all'arrivo.
+const PEZZO_MSG = 4000;
+// Segni di vita: ogni 4 s una sonda; senza risposta entro 8 s il collegamento è caduto (telefono bloccato, rete persa)
+const BATTITO = 4000;
+const RISPOSTA_MAX = 8000;
+// Tempo per collegarsi al centralino (con reti mobili e ponte TURN può volerci qualche secondo in più)
+const ATTESA_COLLEGAMENTO = 12000;
+// Server che aiutano i telefoni a trovarsi (STUN gratuiti: ognuno scopre il proprio indirizzo). Il ponte TURN gratuito
+// di PeerJS che la libreria usava non esiste più (verificato a ottobre 2026): con tutti sulla stessa rete Wi-Fi il
+// collegamento è diretto e non serve. Per reti diverse (es. chi usa i dati del telefono) si può aggiungere un ponte
+// personale (account gratuito, es. Metered o ExpressTURN) da "Stato del collegamento": basta metterlo su un telefono,
+// gli altri lo imparano dal tavolo.
+const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }];
+let ponte = null;   // ponte TURN di questo telefono: { urls, username, credential } (false = nessuno)
+async function caricaPonte() {
+  if (ponte === null) ponte = (await db.impostazione('ponteTurn', null)) || false;
+  return ponte;
+}
+const indirizziPonte = (urls) => String(urls || '').split(/[\s,;]+/).filter((u) => /^(turns?|stun):/i.test(u));
+function serverIce(conPonte = ponte) {
+  const lista = [...STUN];
+  const urls = indirizziPonte(conPonte?.urls);
+  if (urls.length) lista.push({ urls, username: conPonte.username || '', credential: conPonte.credential || '' });
+  return lista;
+}
+const opzioniPeer = () => ({ debug: 0, config: { iceServers: serverIce(), sdpSemantics: 'unified-plan' } });
+async function salvaPonte(nuovo) {
+  ponte = nuovo?.urls ? { urls: String(nuovo.urls), username: String(nuovo.username || ''), credential: String(nuovo.credential || '') } : false;
+  await db.salvaImpostazione('ponteTurn', ponte || null);
+}
+// Un ponte arrivato dal tavolo si tiene solo se questo telefono non ne ha già uno suo
+function imparaPonte(p) { if (p?.urls && !ponte && indirizziPonte(p.urls).length) salvaPonte(p).catch(console.error); }
+// Errori di un singolo messaggio: non significano che la linea è caduta
+const ERRORI_DI_MESSAGGIO = ['message-too-big', 'not-open-yet'];
 
 let libreria = null;
 export const rete = async () => (libreria ||= await import('../vendor/rete-bundle.js'));
@@ -118,6 +156,14 @@ const S = {
   presentiNoti: new Set(),                     // per accorgersi di chi arriva (il Master sincronizza vetrina e schede)
   ultimaScheda: '',                            // ultima scheda completa mandata al Master (per non ripeterla)
   ricezioni: new Map(), chiesteImg: new Set(), // immagini della vetrina in arrivo a pezzi
+  visto: new Map(), vistoHost: 0,              // ultimo segno di vita: di ogni ospite (centralino) / del centralino (ospite)
+  sonde: new Map(), sonda: 0,                  // sonda in attesa di risposta: per ogni ospite (centralino) / verso il centralino
+  battonoTutti: new Set(),                     // centralino: connessioni che mandano i battiti (app aggiornata)
+  hostBatte: false,                            // ospite: il centralino manda i battiti (app aggiornata)
+  falliti: 0, aiutoMostrato: false,            // tentativi di collegamento falliti di fila
+  cambio: null,                                // passaggio del centralino al Master: { nuovo, t }
+  rinunciaCentralino: 0,                       // il Master non è riuscito a diventare centralino: non ci riprova per un po'
+  avvisatiVecchi: new Set(),                   // telefoni con l'app da aggiornare già segnalati
 };
 export const tavoloAttivo = () => (S.fase === 'spento' ? null : tavoloDa(S.codice));
 export const faseTavolo = () => S.fase;
@@ -157,7 +203,30 @@ function controllaPresenze() {
   ascoltaPresenza.forEach((f) => { try { f(nuovi); } catch (e) { console.error(e); } });
 }
 
-function inviaA(conn, msg) { try { if (conn?.open) { conn.send(msg); return true; } } catch (e) { console.warn(e); } return false; }
+function inviaA(conn, msg) {
+  try {
+    if (!conn?.open) return false;
+    const testo = JSON.stringify(msg);
+    if (testo.length <= PEZZO_MSG) { conn.send(msg); return true; }
+    // Messaggio lungo: a pezzi, in ordine (il canale è affidabile e ordinato)
+    const fid = nuovoId(); const n = Math.ceil(testo.length / PEZZO_MSG);
+    for (let i = 0; i < n; i++) conn.send({ tipo: 'frammento', fid, i, n, d: testo.slice(i * PEZZO_MSG, (i + 1) * PEZZO_MSG) });
+    return true;
+  } catch (e) { console.warn('Tavolo: invio non riuscito', e); }
+  return false;
+}
+// Rimette insieme i pezzi di un messaggio lungo: restituisce il messaggio completo, oppure null se ne mancano ancora
+const frammenti = new Map();   // fid → { parti, arrivati, t }
+function ricomponi(m) {
+  if (m?.tipo !== 'frammento') return m;
+  if (!m.fid || !(m.n > 0) || !(m.i >= 0 && m.i < m.n)) return null;
+  let r = frammenti.get(m.fid);
+  if (!r) { r = { parti: new Array(m.n), arrivati: 0, t: Date.now() }; frammenti.set(m.fid, r); }
+  if (r.parti[m.i] == null) { r.parti[m.i] = String(m.d ?? ''); r.arrivati++; }
+  if (r.arrivati < r.parti.length) return null;
+  frammenti.delete(m.fid);
+  try { return JSON.parse(r.parti.join('')); } catch (e) { console.warn('Tavolo: messaggio a pezzi non valido', e); return null; }
+}
 function aTutti(msg, tranne = null) { for (const c of S.conns.keys()) if (c !== tranne) inviaA(c, msg); }
 function invia(msg) {
   if (S.ruolo === 'host') aTutti(msg);
@@ -170,6 +239,7 @@ function pulisciPeer() {
   S.generazione++;
   try { S.peer?.destroy(); } catch {}
   S.peer = null; S.conn = null; S.conns.clear();
+  S.visto.clear(); S.sonde.clear(); S.battonoTutti.clear(); S.hostBatte = false; S.sonda = 0;
 }
 
 async function identitaMaster() {
@@ -181,12 +251,14 @@ async function identitaMaster() {
 // Avvia la sessione: prima prova a collegarsi al centralino; se nessuno risponde e il tavolo è "nostro", lo diventa.
 async function avvia(codice, { puoFareHost = true, master = false } = {}) {
   await caricaTavoli();
+  await caricaPonte();
   if (!master && !stato.pg) return;
   pulisciPeer();
   S.io = master ? await identitaMaster() : { id: stato.pg.id, nome: stato.pg.nome, master: false };
   S.codice = codice; S.chiuso = false; S.ruolo = null;
   S.presenti = new Set([S.io.id]);
   S.fase = 'collegamento';
+  S.falliti = 0; S.aiutoMostrato = false; S.cambio = null;
   const tv = assicuraTavolo(codice);
   tv.ultimoUso = Date.now();
   if (master) tv.master = { id: S.io.id, nome: S.io.nome, t: Date.now() };
@@ -198,7 +270,21 @@ async function avvia(codice, { puoFareHost = true, master = false } = {}) {
 }
 
 function messaggioCiao(tv) {
-  return { tipo: 'ciao', io: S.io, pg: S.io.master ? null : tv.membri[S.io.id], nome: tv.nome, membri: tv.membri, registro: tv.registro.slice(-300) };
+  // Il Master chiede di fare da centralino (il suo telefono di solito resta acceso per tutta la serata),
+  // a meno che un passaggio sia appena fallito. "coda": azioni che tenevo per altri quando facevo io da centralino.
+  const vuoleCentralino = !!S.io.master && Date.now() - S.rinunciaCentralino > 10 * 60e3;
+  const coda = Object.values(tv.inAttesa || {}).flat();
+  return { tipo: 'ciao', protocollo: PROTOCOLLO, io: S.io, pg: S.io.master ? null : tv.membri[S.io.id], nome: tv.nome, membri: tv.membri,
+    registro: tv.registro.slice(-300), vuoleCentralino, coda: coda.length ? coda : undefined, ponte: ponte || undefined };
+}
+
+// Troppi tentativi a vuoto: si spiega cosa fare (una volta), ma si continua a provare
+function contaFallimento() {
+  S.falliti++;
+  if (S.falliti >= 3 && !S.aiutoMostrato) {
+    S.aiutoMostrato = true;
+    avviso('Non riesco ancora a raggiungere il tavolo, continuo a provare. Tenete aperta l\'app sul telefono che fa da centralino (di solito il Master) e, se potete, collegatevi tutti alla stessa rete Wi-Fi.', 'errore');
+  }
 }
 
 async function tentaOspite({ poiHost }) {
@@ -206,11 +292,18 @@ async function tentaOspite({ poiHost }) {
   if (S.chiuso) return;
   pulisciPeer();
   const gen = S.generazione;
-  const p = new Peer({ debug: 0 });
+  const p = new Peer(opzioniPeer());
   S.peer = p;
   let deciso = false;
-  const fallito = () => {
+  // assente: nessuno ha aperto il tavolo; lento: il centralino c'è ma il collegamento non si è aperto in tempo
+  const fallito = (motivo) => {
     if (deciso || gen !== S.generazione) return; deciso = true;
+    if (motivo === 'lento') {
+      contaFallimento();
+      // Si prova a prendere il posto del centralino (se è sparito il suo indirizzo è libero), altrimenti si riprova
+      if (poiHost) tentaHost(); else riprovaTra(1500 + Math.random() * 1500, { poiHost });
+      return;
+    }
     if (poiHost) { tentaHost(); return; }
     // Codice sconosciuto e nessuno risponde: si dimentica il tavolo appena creato e si avvisa
     const tv = tavoloDa(S.codice);
@@ -222,24 +315,31 @@ async function tentaOspite({ poiHost }) {
   p.on('open', () => {
     if (gen !== S.generazione) return;
     const c = p.connect(PREFISSO + S.codice, { reliable: true, serialization: 'json' });
-    const scadenza = setTimeout(fallito, 7000);
+    const scadenza = setTimeout(() => fallito('lento'), ATTESA_COLLEGAMENTO);
     c.on('open', () => {
       if (gen !== S.generazione) return;
       clearTimeout(scadenza); deciso = true;
-      S.conn = c; S.ruolo = 'ospite';
+      S.conn = c; S.ruolo = 'ospite'; S.vistoHost = Date.now();
       const tv = tavoloDa(S.codice);
       if (!S.io.master && stato.pg?.id === S.io.id) tv.membri[S.io.id] = istantanea(stato.pg);
       inviaA(c, messaggioCiao(tv));
+      // Se il benvenuto non arriva (es. centralino con l'app vecchia), non si resta bloccati: si riprova
+      setTimeout(() => { if (gen === S.generazione && !S.chiuso && S.fase !== 'collegato') { contaFallimento(); centralinoPerso(); } }, 20000);
     });
-    c.on('data', (m) => gen === S.generazione && riceviOspite(m));
+    c.on('data', (m) => {
+      if (gen !== S.generazione) return;
+      S.vistoHost = Date.now();
+      const msg = ricomponi(m);
+      if (msg) riceviOspite(msg);
+    });
     const perso = () => { if (gen === S.generazione && deciso) centralinoPerso(); };
     c.on('close', perso);
-    c.on('error', perso);
+    c.on('error', (e) => { if (ERRORI_DI_MESSAGGIO.includes(e?.type)) console.warn('Tavolo:', e.type); else perso(); });
   });
   p.on('error', (e) => {
     if (gen !== S.generazione) return;
-    if (e.type === 'peer-unavailable') fallito();
-    else if (ERRORI_DA_RIPROVARE.includes(e.type)) riprovaTra(4000 + Math.random() * 2000, { poiHost });
+    if (e.type === 'peer-unavailable') fallito('assente');
+    else if (ERRORI_DA_RIPROVARE.includes(e.type)) riprovaTra(3000 + Math.random() * 2000, { poiHost });
     else console.warn('Tavolo:', e.type, e);
   });
 }
@@ -249,11 +349,11 @@ async function tentaHost() {
   if (S.chiuso) return;
   pulisciPeer();
   const gen = S.generazione;
-  const p = new Peer(PREFISSO + S.codice, { debug: 0 });
+  const p = new Peer(PREFISSO + S.codice, opzioniPeer());
   S.peer = p;
   p.on('open', () => {
     if (gen !== S.generazione) return;
-    S.ruolo = 'host'; S.fase = 'collegato';
+    S.ruolo = 'host'; S.fase = 'collegato'; S.falliti = 0; S.cambio = null;
     S.presenti = new Set([S.io.id]);
     const tv = tavoloDa(S.codice);
     if (!S.io.master && stato.pg?.id === S.io.id) tv.membri[S.io.id] = istantanea(stato.pg);
@@ -263,25 +363,43 @@ async function tentaHost() {
     salvaTavoli(); aggiornaViste();
   });
   p.on('connection', (c) => {
-    c.on('data', (m) => gen === S.generazione && riceviHost(c, m));
-    const via = () => {
-      if (gen !== S.generazione || !S.conns.has(c)) return;
-      const id = S.conns.get(c); S.conns.delete(c);
-      if (![...S.conns.values()].includes(id)) S.presenti.delete(id);
-      aTutti({ tipo: 'presenti', presenti: [...S.presenti] });
-      aggiornaViste();
-    };
+    S.visto.set(c, Date.now());
+    c.on('data', (m) => {
+      if (gen !== S.generazione) return;
+      S.visto.set(c, Date.now());
+      const msg = ricomponi(m);
+      if (msg) riceviHost(c, msg);
+    });
+    const via = () => { if (gen === S.generazione) togliConnessione(c); };
     c.on('close', via);
-    c.on('error', via);
+    c.on('error', (e) => { if (ERRORI_DI_MESSAGGIO.includes(e?.type)) console.warn('Tavolo:', e.type); else via(); });
   });
   p.on('disconnected', () => { if (gen === S.generazione && !S.chiuso && !p.destroyed) try { p.reconnect(); } catch {} });
   p.on('error', (e) => {
     if (gen !== S.generazione) return;
-    // Qualcun altro è diventato centralino un attimo prima: mi collego a lui
+    // Qualcun altro è diventato centralino un attimo prima (o il vecchio centralino non ha ancora liberato l'indirizzo):
+    // mi collego a lui
     if (e.type === 'unavailable-id') riprovaTra(600 + Math.random() * 800, { poiHost: true });
-    else if (ERRORI_DA_RIPROVARE.includes(e.type)) riprovaTra(4000 + Math.random() * 2000, { poiHost: true });
+    else if (ERRORI_DA_RIPROVARE.includes(e.type)) riprovaTra(3000 + Math.random() * 2000, { poiHost: true });
     else console.warn('Tavolo (centralino):', e.type, e);
   });
+}
+
+// Fotografia del collegamento (per il pannello "Stato del collegamento" e per le prove)
+export function diagnostica() {
+  return { fase: S.fase, ruolo: S.ruolo, presenti: S.presenti.size, ospiti: S.conns.size,
+    silenzioCentralino: S.ruolo === 'ospite' ? Math.round((Date.now() - S.vistoHost) / 1000) : null,
+    centralinoAggiornato: S.hostBatte, lineaAperta: S.ruolo === 'ospite' ? !!S.conn?.open : null, falliti: S.falliti };
+}
+
+// Il centralino toglie un ospite che se n'è andato (o che non dà più segni di vita)
+function togliConnessione(c) {
+  S.visto.delete(c); S.sonde.delete(c); S.battonoTutti.delete(c);
+  if (!S.conns.has(c)) return;
+  const id = S.conns.get(c); S.conns.delete(c);
+  if (![...S.conns.values()].includes(id)) S.presenti.delete(id);
+  aTutti({ tipo: 'presenti', presenti: [...S.presenti] });
+  aggiornaViste();
 }
 
 function riprovaTra(ms, opz) {
@@ -294,13 +412,68 @@ function riprovaTra(ms, opz) {
 
 // Il centralino non risponde più: dopo una pausa casuale (così non ci provano tutti insieme) ci si ricollega,
 // e se il centralino non c'è più uno dei presenti prende il suo posto.
+// Se il centralino ha appena passato il ruolo al Master, il Master prova subito e gli altri aspettano qualche secondo.
 function centralinoPerso() {
   if (S.chiuso) return;
-  S.fase = 'riconnessione'; S.conn = null;
+  const cambio = S.cambio && Date.now() - S.cambio.t < 30000 ? S.cambio : null;
+  S.fase = 'riconnessione'; S.conn = null; S.hostBatte = false; S.sonda = 0;
   S.presenti = new Set([S.io.id]);
   aggiornaViste();
-  riprovaTra(800 + Math.random() * 2200, { poiHost: true });
+  if (cambio && cambio.nuovo === S.io.id) {
+    clearTimeout(S.timer);
+    const gen = S.generazione;
+    S.timer = setTimeout(() => { if (!S.chiuso && gen === S.generazione) tentaHost(); }, 500);
+    return;
+  }
+  riprovaTra(cambio ? 3000 + Math.random() * 1500 : 800 + Math.random() * 2200, { poiHost: true });
 }
+
+// Il centralino è il telefono di un giocatore e arriva il Master: gli passa il ruolo. Avvisa tutti, poi libera
+// l'indirizzo del tavolo; il Master lo prende subito e gli altri si ricollegano a lui pochi secondi dopo.
+function cediCentralino(idMaster) {
+  if (S.ruolo !== 'host' || S.io.master || S.cambio) return;
+  S.cambio = { nuovo: idMaster, t: Date.now() };
+  aTutti({ tipo: 'cambioCentralino', nuovo: idMaster });
+  const gen = S.generazione;
+  setTimeout(() => {
+    if (S.chiuso || gen !== S.generazione) return;
+    pulisciPeer();   // chiude i collegamenti e libera l'indirizzo
+    S.ruolo = null;
+    centralinoPerso();
+  }, 1500);
+}
+
+// ───── Segni di vita ─────
+// Ogni 4 s centralino e ospiti si mandano una "sonda" e chi la riceve risponde subito. Se una sonda resta senza
+// risposta per 8 s il collegamento è caduto: l'ospite si ricollega (o prende il posto del centralino), il centralino lo
+// toglie dai presenti. La risposta parte appena arriva la sonda, quindi conta solo l'orologio di chi controlla.
+// Se questo telefono era addormentato (schermo spento, timer fermi) prima di decidere si manda una sonda nuova.
+let ultimoGiro = Date.now(), ultimoRisveglio = 0;
+setInterval(() => {
+  const ora = Date.now();
+  // Risveglio: i timer erano fermi. Se succede di continuo (pagina in secondo piano che il browser rallenta) non si
+  // concede altro tempo, altrimenti non ci si accorgerebbe mai di un collegamento caduto.
+  const risveglio = ora - ultimoGiro > BATTITO * 2.5 && ora - ultimoRisveglio > 30000;
+  if (risveglio) ultimoRisveglio = ora;
+  ultimoGiro = ora;
+  for (const [fid, r] of frammenti) if (ora - r.t > 60e3) frammenti.delete(fid);
+  if (S.chiuso || S.fase === 'spento') return;
+  if (S.ruolo === 'host') {
+    for (const [c, t] of [...S.visto]) {
+      if (!S.conns.has(c)) {   // collegamento aperto ma mai presentato (niente "ciao"): dopo 30 s si chiude
+        if (!risveglio && ora - t > 30000) { try { c.close(); } catch {} togliConnessione(c); }
+        continue;
+      }
+      if (!S.battonoTutti.has(c)) { inviaA(c, { tipo: 'battito' }); continue; }   // app vecchia: si toglie solo se la linea si chiude
+      const sonda = S.sonde.get(c);
+      if (risveglio || !sonda || t >= sonda) { S.sonde.set(c, ora); inviaA(c, { tipo: 'battito', sonda: 1 }); }
+      else if (ora - sonda > RISPOSTA_MAX) { try { c.close(); } catch {} togliConnessione(c); }
+    }
+  } else if (S.ruolo === 'ospite' && S.conn) {
+    if (risveglio || !S.sonda || S.vistoHost >= S.sonda) { S.sonda = ora; inviaA(S.conn, { tipo: 'battito', sonda: 1 }); }
+    else if (S.hostBatte && ora - S.sonda > RISPOSTA_MAX) { centralinoPerso(); return; }
+  }
+}, BATTITO);
 
 // ───────────────────────── Messaggi ─────────────────────────
 
@@ -329,23 +502,37 @@ function diffondi(m, tranne = null) {
 function riceviHost(c, m) {
   const tv = tavoloDa(S.codice);
   if (!tv || !m || typeof m !== 'object') return;
+  if (m.tipo === 'battito') { S.battonoTutti.add(c); if (m.sonda) inviaA(c, { tipo: 'battito' }); return; }
   if (m.tipo === 'ciao' && m.io?.id) {
     const id = m.io.id;
+    // Lo stesso telefono può riaprire il collegamento prima che il vecchio si chiuda: resta solo il più recente
+    for (const [vecchia, x] of [...S.conns]) if (x === id && vecchia !== c) { S.conns.delete(vecchia); S.visto.delete(vecchia); S.sonde.delete(vecchia); S.battonoTutti.delete(vecchia); try { vecchia.close(); } catch {} }
     S.conns.set(c, id);
     S.presenti.add(id);
+    if (m.protocollo >= PROTOCOLLO) S.battonoTutti.add(c);
+    else avvisaAppVecchia(id, m.io.master ? 'Il Master' : m.pg?.nome || m.io.nome);
+    // Azioni in coda che teneva un vecchio centralino: passano a me, che le consegno
+    if (Array.isArray(m.coda)) for (const q of m.coda) {
+      if (!q?.a || !q.id) continue;
+      const lista = (tv.inAttesa[q.a] ||= []);
+      if (!lista.some((x) => x.id === q.id)) lista.push(q);
+    }
     uniscMembri(tv, m.membri);
     if (m.io.master) tv.master = { id, nome: m.io.nome, t: Date.now() };
     else if (m.pg) tv.membri[id] = m.pg;
     if (!S.io.master && stato.pg?.id === S.io.id) tv.membri[S.io.id] = istantanea(stato.pg);
     const nuove = uniscRegistro(tv, m.registro);
     if (/^Tavolo [A-Z0-9]{6}$/.test(tv.nome) && m.nome && !/^Tavolo [A-Z0-9]{6}$/.test(m.nome)) tv.nome = m.nome;
-    inviaA(c, { tipo: 'benvenuto', nome: tv.nome, membri: tv.membri, registro: tv.registro, presenti: [...S.presenti], master: tv.master || null, turno: tv.turno || null });
+    imparaPonte(m.ponte);
+    inviaA(c, { tipo: 'benvenuto', protocollo: PROTOCOLLO, ponte: ponte || undefined, nome: tv.nome, membri: tv.membri, registro: tv.registro, presenti: [...S.presenti], master: tv.master || null, turno: tv.turno || null });
     if (m.pg) aTutti({ tipo: 'stato', pg: m.pg }, c);
     if (m.io.master) aTutti({ tipo: 'master', master: tv.master }, c);
     aTutti({ tipo: 'presenti', presenti: [...S.presenti] }, c);
     if (nuove.length) aTutti({ tipo: 'voci', voci: nuove }, c);
     segnaArrivo(tv, m.io);
-    consegnaCoda(tv, id);
+    for (const chi of S.presenti) consegnaCoda(tv, chi);
+    // Arriva il Master e il centralino è il telefono di un giocatore: gli passo il ruolo (più stabile per tutti)
+    if (m.io.master && m.vuoleCentralino && !S.io.master) setTimeout(() => cediCentralino(id), 800);
   } else if (m.tipo === 'stato' && m.pg?.id) {
     tv.membri[m.pg.id] = m.pg;
     aTutti({ tipo: 'stato', pg: m.pg }, c);
@@ -364,7 +551,17 @@ function riceviHost(c, m) {
 function riceviOspite(m) {
   const tv = tavoloDa(S.codice);
   if (!tv || !m || typeof m !== 'object') return;
+  if (m.tipo === 'battito') { S.hostBatte = true; if (m.sonda) inviaA(S.conn, { tipo: 'battito' }); return; }
+  if (m.tipo === 'cambioCentralino') { S.cambio = { nuovo: m.nuovo, t: Date.now() }; return; }
   if (m.tipo === 'benvenuto') {
+    if (m.protocollo >= PROTOCOLLO) S.hostBatte = true;
+    else avvisaAppVecchia('centralino', 'Il telefono che fa da centralino');
+    imparaPonte(m.ponte);
+    // Il centralino (aggiornato) ha ricevuto la mia coda nel "ciao" e la consegna lui: non la tengo più io
+    if (m.protocollo >= PROTOCOLLO && Object.keys(tv.inAttesa || {}).length) tv.inAttesa = {};
+    // Dovevo diventare io il centralino ma qualcuno mi ha preceduto: per un po' non ci riprovo
+    if (S.cambio?.nuovo === S.io.id) S.rinunciaCentralino = Date.now();
+    S.cambio = null; S.falliti = 0;
     if (m.nome) tv.nome = m.nome;
     uniscMembri(tv, m.membri);
     if (!S.io.master && stato.pg?.id === S.io.id) tv.membri[S.io.id] = istantanea(stato.pg);
@@ -388,6 +585,13 @@ function riceviOspite(m) {
   } else return;
   salvaTavoli(); aggiornaViste();
 }
+// Un telefono al tavolo ha un'app vecchia (prima della 1.11.0): il collegamento con lui può cadere. Si avvisa una volta.
+function avvisaAppVecchia(chiave, chi) {
+  if (S.avvisatiVecchi.has(chiave)) return;
+  S.avvisatiVecchi.add(chiave);
+  setTimeout(() => avviso(`${chi} ha una versione vecchia dell'app: aprite l'app su quel telefono e toccate "Aggiorna" (serve la versione 1.11.0 o successiva), altrimenti il collegamento può cadere.`, 'errore'), 1500);
+}
+
 function applicaNomeDaVoci(tv, voci) {
   const v = voci?.filter((x) => x.tipo === 'nome' && x.nomeTavolo).pop();
   if (v) tv.nome = v.nomeTavolo;
@@ -965,14 +1169,41 @@ export function sospendi() {
 }
 
 // Il telefono torna in primo piano (sbloccato): si controlla che il collegamento sia ancora vivo
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || S.chiuso || S.fase === 'spento') return;
+function controllaLinea() {
+  if (S.chiuso || S.fase === 'spento') return;
   const p = S.peer;
   if (!p || p.destroyed) { if (S.ruolo === 'host') tentaHost(); else tentaOspite({ poiHost: true }); return; }
+  if (S.fase !== 'collegato') return;   // un tentativo di collegamento è già in corso
   if (p.disconnected) try { p.reconnect(); } catch {}
-  if (S.ruolo === 'ospite' && !S.conn?.open) centralinoPerso();
-  else pubblicaStato();
-});
+  if (S.ruolo === 'ospite') {
+    if (!S.conn?.open) { centralinoPerso(); return; }
+    inviaA(S.conn, { tipo: 'battito' });
+  } else if (S.ruolo === 'host') aTutti({ tipo: 'battito' });
+  pubblicaStato();
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') controllaLinea(); });
+// Torna la rete (es. passaggio da Wi-Fi a rete mobile): si controlla subito il collegamento
+window.addEventListener('online', () => setTimeout(controllaLinea, 1000));
+
+// ───── Schermo sempre acceso al tavolo (tutte le edizioni) ─────
+// Quando lo schermo si spegne il telefono ferma l'app e il collegamento con i compagni cade. Mentre sei al tavolo
+// (o in modalità Master) lo schermo resta acceso (Screen Wake Lock), su iPhone come su Android.
+let bloccoSchermo = null;
+async function aggiornaSchermoAcceso() {
+  const serve = document.visibilityState === 'visible' && (S.fase !== 'spento' || document.body?.dataset.schermata === 'master');
+  if (serve && !bloccoSchermo && 'wakeLock' in navigator) {
+    try {
+      bloccoSchermo = await navigator.wakeLock.request('screen');
+      bloccoSchermo.addEventListener('release', () => { bloccoSchermo = null; });
+    } catch { bloccoSchermo = null; }
+  } else if (!serve && bloccoSchermo) {
+    try { await bloccoSchermo.release(); } catch {}
+    bloccoSchermo = null;
+  }
+}
+ascoltatori.add(aggiornaSchermoAcceso);
+document.addEventListener('visibilitychange', aggiornaSchermoAcceso);
+if (document.body) new MutationObserver(aggiornaSchermoAcceso).observe(document.body, { attributes: true, attributeFilter: ['data-schermata'] });
 
 // ───────────────────────── Interfaccia ─────────────────────────
 
@@ -1080,8 +1311,76 @@ export async function apriTavolo({ master = false } = {}) {
 export function testaTavolo(tv) {
   return h('div.tavolo-testa',
     h('div.tavolo-titoli', h('h3.tavolo-nome', tv.nome),
-      h('p.tavolo-fase', { 'data-fase': S.fase }, S.fase === 'collegato' ? testoPresenze(tv) : TESTO_FASE[S.fase])),
+      h('p.tavolo-fase', { 'data-fase': S.fase }, S.fase === 'collegato' ? testoPresenze(tv) : TESTO_FASE[S.fase]),
+      h('button.btn-link', { onclick: apriCollegamento }, '📶 Stato del collegamento')),
     h('button.codice-btn', { onclick: () => mostraQR(tv.codice) }, h('small', 'Codice'), h('strong', tv.codice), h('small', 'mostra QR')));
+}
+
+// ───── Stato del collegamento e ponte TURN ─────
+// Chi è collegato, chi fa da centralino, e il ponte facoltativo per telefoni su reti diverse.
+export async function apriCollegamento() {
+  await caricaPonte();
+  pannello('Stato del collegamento', (c) => {
+    c.append(vivo(() => {
+      const tv = tavoloAttivo();
+      const nomeDi = (id) => (id === tv?.master?.id ? 'Il Master' : tv?.membri[id]?.nome || 'Qualcuno');
+      const ruolo = S.fase !== 'collegato' ? TESTO_FASE[S.fase] || 'Non sei al tavolo'
+        : S.ruolo === 'host' ? 'Questo telefono fa da centralino: gli altri si collegano a lui. Tienilo acceso e con l\'app aperta.'
+          : 'Collegato al centralino del tavolo.';
+      return h('div',
+        h('p', h('strong', ruolo)),
+        S.fase === 'collegato' ? h('p.nota', `Al tavolo adesso (${S.presenti.size}): ${[...S.presenti].map(nomeDi).join(', ')}.`) : null,
+        h('p.nota', 'Non c\'è un numero massimo di partecipanti. Lo schermo resta acceso finché sei al tavolo. Se arriva il Master e il centralino è il telefono di un giocatore, il ruolo passa da solo al Master (in pochi secondi tutti si ricollegano).'));
+    }));
+    // Ponte TURN
+    const campoUrl = h('textarea.campo', { rows: 2, placeholder: 'es. turn:global.relay.metered.ca:80 turn:global.relay.metered.ca:443?transport=tcp' });
+    const campoUtente = h('input.campo', { placeholder: 'Nome utente', autocomplete: 'off' });
+    const campoPw = h('input.campo', { placeholder: 'Password (credential)', autocomplete: 'off' });
+    campoUrl.value = ponte?.urls || ''; campoUtente.value = ponte?.username || ''; campoPw.value = ponte?.credential || '';
+    const esito = h('p.nota');
+    const leggi = () => ({ urls: campoUrl.value.trim(), username: campoUtente.value.trim(), credential: campoPw.value.trim() });
+    c.append(
+      h('h3.card-titolo', 'Ponte per reti diverse (facoltativo)'),
+      h('p.nota', 'Se siete tutti sulla stessa rete Wi-Fi non serve. Serve se qualcuno usa i dati del telefono o se il Wi-Fi non lascia parlare i telefoni tra loro. Si crea un account gratuito per un "server TURN" (es. Metered o ExpressTURN) e si copiano qui indirizzo, utente e password. Basta farlo sul telefono del Master: gli altri lo ricevono dal tavolo.'),
+      campo('Indirizzi del ponte', campoUrl), campo('Utente', campoUtente), campo('Password', campoPw),
+      esito,
+      h('div.riga-btn',
+        h('button.btn', { onclick: async () => {
+          const cfg = leggi();
+          if (!indirizziPonte(cfg.urls).length) { esito.textContent = 'Scrivi almeno un indirizzo che inizia con turn: (o turns:)'; return; }
+          esito.textContent = 'Provo il ponte… (qualche secondo)';
+          const n = await provaPonte(cfg);
+          esito.textContent = n ? `Il ponte funziona ✓ (${n} percorsi trovati). Tocca "Salva".` : 'Il ponte non risponde: controlla indirizzo, utente e password.';
+        } }, 'Prova'),
+        h('button.btn.primario', { onclick: async () => {
+          const cfg = leggi();
+          if (cfg.urls && !indirizziPonte(cfg.urls).length) { esito.textContent = 'Gli indirizzi devono iniziare con turn: (o turns:)'; return; }
+          await salvaPonte(cfg.urls ? cfg : null);
+          esito.textContent = cfg.urls ? 'Ponte salvato. Vale dal prossimo collegamento.' : 'Ponte tolto.';
+          if (S.fase === 'collegato') riavviaCollegamento();
+        } }, 'Salva')),
+      ponte ? h('button.btn-link', { onclick: async () => { await salvaPonte(null); campoUrl.value = campoUtente.value = campoPw.value = ''; esito.textContent = 'Ponte tolto da questo telefono.'; } }, 'Togli il ponte da questo telefono') : null);
+  }, { classe: 'stretto' });
+}
+
+// Prova un ponte TURN: quanti percorsi "relay" offre in ~8 secondi (0 = non funziona)
+async function provaPonte(cfg) {
+  let pc;
+  try {
+    pc = new RTCPeerConnection({ iceServers: serverIce(cfg).slice(STUN.length), iceTransportPolicy: 'relay' });
+    const trovati = new Set();
+    pc.onicecandidate = (e) => { if (e.candidate?.type === 'relay') trovati.add(e.candidate.address + ':' + e.candidate.port + ':' + e.candidate.protocol); };
+    pc.createDataChannel('prova');
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((ok) => { const t = setTimeout(ok, 8000); pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); ok(); } }; });
+    return trovati.size;
+  } catch (e) { console.warn(e); return 0; } finally { try { pc?.close(); } catch {} }
+}
+
+// Ricollega subito con le impostazioni nuove (es. dopo aver salvato il ponte)
+function riavviaCollegamento() {
+  if (S.chiuso || S.fase === 'spento') return;
+  if (S.ruolo === 'host') { pulisciPeer(); tentaHost(); } else centralinoPerso();
 }
 
 function contenutoTavolo({ master }) {
