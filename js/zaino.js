@@ -15,7 +15,7 @@ const pg = () => stato.pg;
 const descrArma = (a) => `${a.danni} ${a.tipoDanno}${a.prop.length ? ' · ' + testoProprieta(a) : ''}${a.maestria ? ' · Maestria: ' + MAESTRIE[a.maestria].nome : ''}${a.nota ? '. ' + a.nota : ''}`;
 const descrArmatura = (a) => a.tipo === 'scudo' ? '+2 alla CA.'
   : `CA ${a.base}${a.tipo === 'leggera' ? ' + DES' : a.tipo === 'media' ? ' + DES (max 2)' : ''} · armatura ${a.tipo}${a.forza ? ` · serve Forza ${a.forza}` : ''}${a.furtivita ? ' · svantaggio a Furtività' : ''}`;
-const oggettoBase = () => ({ id: nuovoId(), qta: 1, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' });
+const oggettoBase = () => ({ id: nuovoId(), qta: 1, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, magico: 0, versioneModello: '' });
 export const oggettoDaArma = (a) => ({ ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArma(a), tipo: 'arma', slot: 'manoDx', arma: a.id });
 export const oggettoDaArmatura = (a) => a.tipo === 'scudo'
   ? { ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArmatura(a), tipo: 'scudo', slot: 'manoSx', bonusCA: 2, armaturaId: a.id }
@@ -34,8 +34,10 @@ function apriManuale() {
           CATEGORIE_ARMI.map(([cat, tipo, et]) => h('div', h('h4.sottotitolo', et),
             ARMI.filter((a) => a.cat === cat && a.tipo === tipo).map((a) => h('button.voce-prontuario', { onclick: () => {
               modifica((x) => {
-                x.inventario.push(oggettoDaArma(a));
-                if (creaAttacco && !x.attacchi.some((t) => t.arma === a.id)) x.attacchi.push({ id: nuovoId(), ...R.attaccoDaArma(x, a) });
+                const ogg = oggettoDaArma(a);
+                x.inventario.push(ogg);
+                // l'attacco resta collegato a quest'arma dello zaino (così ne prende il bonus magico)
+                if (creaAttacco && !x.attacchi.some((t) => t.arma === a.id && !t.oggetto)) x.attacchi.push({ id: nuovoId(), ...R.attaccoDaArma(x, a), oggetto: ogg.id });
               }, 'equip');
               avviso(`Aggiunto allo zaino: ${a.nome}${creaAttacco ? ' (con il suo attacco)' : ''}`);
             } }, h('strong', a.nome),
@@ -86,7 +88,7 @@ export function renderZaino(c) {
 function rigaOggetto(o) {
   const el = h('div.oggetto' + (o.equip ? '.equip' : '') + (aperto === o.id ? '.aperto' : ''),
     h('div.ogg-testa', { onclick: () => { aperto = aperto === o.id ? null : o.id; el.classList.toggle('aperto'); } },
-      h('div.ogg-nome', h('strong', o.nome, o.qta > 1 ? h('span.qta', ' ×' + o.qta) : null),
+      h('div.ogg-nome', h('strong', o.nome, o.qta > 1 ? h('span.qta', ' ×' + o.qta) : null, R.etichettaMagico(o.nome, o.magico) ? h('span.badge.oro', R.etichettaMagico(o.nome, o.magico)) : null),
         h('small', [TIPI.find((t) => t[0] === o.tipo)?.[1], o.slot ? nomeSlot(o.slot) : null, fmtKg((o.peso || 0) * (o.qta || 0))].filter(Boolean).join(' · '))),
       o.modello ? h('span.badge3d', '3D') : null,
       o.slot ? h('button.btn.piccolo' + (o.equip ? '.primario' : ''), { onclick: (e) => { e.stopPropagation(); equipaggia(o); } }, o.equip ? 'Togli' : 'Equipaggia') : null),
@@ -123,7 +125,7 @@ function scegliPerSlot(slot) {
 
 export function apriOggetto(o, slotIniziale = '') {
   const nuovo = !o;
-  const ogg = o ? structuredClone(o) : { id: nuovoId(), nome: '', qta: 1, peso: 0, descrizione: '', tipo: 'oggetto', slot: slotIniziale, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' };
+  const ogg = o ? structuredClone(o) : { id: nuovoId(), nome: '', qta: 1, peso: 0, descrizione: '', tipo: 'oggetto', slot: slotIniziale, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, magico: 0, versioneModello: '' };
   pannello(nuovo ? 'Nuovo oggetto' : ogg.nome, (c, chiudi) => {
     const set = (k) => (v) => (ogg[k] = v);
     const zonaExtra = h('div');
@@ -152,7 +154,12 @@ export function apriOggetto(o, slotIniziale = '') {
             h('label.check', h('input', { type: 'checkbox', checked: !!ogg.armatura?.furtivita, onchange: (e) => (ogg.armatura = { ...(ogg.armatura || { base: 11, tipo: 'leggera' }), furtivita: e.target.checked }) }), ' Svantaggio a Furtività')),
           campo('Versione del personaggio da mostrare', selezione([['', '— Modello predefinito —'], ...p.modelli.map((m) => [m.id, m.nome])], ogg.versioneModello, set('versioneModello'))),
           h('p.nota', 'Quando equipaggi questa armatura, il visualizzatore 3D mostra la versione scelta del tuo personaggio. Le versioni si caricano nella scheda Eroe → Modelli 3D.')) : null,
-        campo('Bonus alla CA (scudi, anelli…)', inputNum(ogg.bonusCA, set('bonusCA'))));
+        ['arma', 'armatura', 'scudo'].includes(ogg.tipo) || ogg.slot === 'armatura' ? h('div.box-magico',
+          campo('Bonus magico', selezione([[0, 'Nessuno (oggetto normale)'], [1, '+1'], [2, '+2'], [3, '+3']], Number(ogg.magico) || 0, (v) => (ogg.magico = Number(v)))),
+          h('p.nota', ogg.tipo === 'arma'
+            ? 'Si somma da solo al tiro per colpire e ai danni degli attacchi fatti con quest\'arma (Combatti).'
+            : 'Si somma da solo alla CA quando l\'oggetto è equipaggiato.')) : null,
+        campo(ogg.tipo === 'scudo' ? 'Bonus alla CA dello scudo (di solito 2)' : 'Altro bonus alla CA (anelli, mantelli…)', inputNum(ogg.bonusCA, set('bonusCA'))));
     };
     const disegnaModello = async () => {
       let info = null;

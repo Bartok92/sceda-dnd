@@ -420,7 +420,7 @@ function rigaAttacco(a) {
   const pesante = R.avvisoArmaPesante(p, arma);
   const dettagli = [a.tipo, a.gittata, arma?.prop.length ? testoProprieta(arma, { gittata: false }) : null, a.note].filter(Boolean).join(' · ');
   return h('div.attacco',
-    h('div.att-info', { onclick: () => modificaAttacco(a) }, h('strong', a.nome), h('small', dettagli || 'tocca per modificare')),
+    h('div.att-info', { onclick: () => modificaAttacco(a) }, h('strong', a.nome, R.etichettaMagico(a.nome, R.bonusMagicoAttacco(p, a)) ? h('span.badge.oro', R.etichettaMagico(a.nome, R.bonusMagicoAttacco(p, a))) : null), h('small', dettagli || 'tocca per modificare')),
     h('div.att-extra',
       mast ? h('button.chip-maestria' + (attiva ? '.attiva' : ''), { onclick: () => mostraMaestria(a, arma) }, `⚔ ${mast.nome}`) : null,
       arma?.versatile ? h('button.chip-mini', { onclick: () => E.tiraCon(R.attaccoDanni(p, a, { dadi: arma.versatile }), `${a.nome}: danni a due mani`, 'danni') }, `a 2 mani ${arma.versatile}`) : null,
@@ -480,11 +480,12 @@ function modificaAttacco(a) {
   const att = a ? structuredClone(a) : { id: nuovoId(), nome: '', arma: null, car: 'FOR', comp: true, bonus: 0, danni: '1d8', bonusDanni: 0, tipo: 'taglienti', modDanni: true, gittata: '1,5 m', note: '' };
   pannello(nuovo ? 'Nuovo attacco' : 'Modifica attacco', (c, chiudi) => {
     // Prende da un'arma del manuale dadi, tipo di danno, caratteristica, gittata e competenza
-    const usaArma = (arma, nome) => {
+    const usaArma = (arma, nome, oggettoId = null) => {
       const vecchia = R.armaDi(att);
       Object.assign(att, R.attaccoDaArma(pg(), arma, {
         nome: nome || (!att.nome.trim() || att.nome === vecchia?.nome ? arma.nome : att.nome), bonus: att.bonus, bonusDanni: att.bonusDanni, note: att.note }));
       att.danniManuali = false;
+      att.oggetto = oggettoId;   // arma dello zaino (per il suo bonus magico); null se scelta dall'elenco del manuale
       disegna();
     };
     const disegna = () => {
@@ -498,8 +499,10 @@ function modificaAttacco(a) {
         arma ? schedaArma(p, arma) : h('p.nota', 'Scegli un\'arma: danni, tipo, proprietà e maestria si compilano da soli. Per trucchetti e attacchi speciali lascia "Nessuna".'),
         armiZaino.length ? h('div.chips.piccoli', h('span.etichetta', 'Dallo zaino:'), armiZaino.map((o) => h('button.chip', { onclick: () => {
           const x = R.armaDaId(o.arma) || R.armaDaNome(o.nome);
-          if (x) usaArma(x, o.nome); else { att.nome = o.nome; disegna(); }
-        } }, o.nome))) : null,
+          if (x) usaArma(x, o.nome, o.id); else { att.nome = o.nome; att.oggetto = o.id; disegna(); }
+        } }, o.nome, R.etichettaMagico(o.nome, o.magico)))) : null,
+        R.oggettoDiAttacco(p, att) ? h('p.nota', `Collegato all'arma dello zaino «${R.oggettoDiAttacco(p, att).nome}»` + (R.bonusMagicoAttacco(p, att) ? `: il suo bonus magico +${R.bonusMagicoAttacco(p, att)} si somma da solo a colpire e danni.` : '.'),
+          ' ', h('button.btn-link', { onclick: () => { att.oggetto = null; disegna(); } }, 'Scollega')) : null,
         campo('Nome', inputTesto(att.nome, set('nome'), { placeholder: 'Es. Ascia bipenne +1' })),
         h('div.griglia2',
           campo('Caratteristica', selezione([['FOR', 'Forza'], ['DES', 'Destrezza'], ['ACC', 'FOR o DES (la migliore)'], ['MAG', 'Car. incantatore'], ['COS', 'Costituzione'], ['INT', 'Intelligenza'], ['SAG', 'Saggezza'], ['CAR', 'Carisma']], att.car, set('car'))),
@@ -510,8 +513,8 @@ function modificaAttacco(a) {
           campo('Tipo di danno', inputTesto(att.tipo, set('tipo'), { list: 'tipi-danno' }))),
         h('datalist#tipi-danno', ['taglienti', 'perforanti', 'contundenti', 'fuoco', 'freddo', 'fulmine', 'acido', 'veleno', 'necrotici', 'radiosi', 'forza', 'psichici', 'tuono'].map((t) => h('option', { value: t }))),
         h('div.griglia2',
-          campo('Bonus magico al colpire', inputNum(att.bonus, set('bonus'))),
-          campo('Bonus magico ai danni', inputNum(att.bonusDanni, set('bonusDanni')))),
+          campo(R.oggettoDiAttacco(p, att) ? 'Altro bonus al colpire' : 'Bonus magico al colpire', inputNum(att.bonus, set('bonus'))),
+          campo(R.oggettoDiAttacco(p, att) ? 'Altro bonus ai danni' : 'Bonus magico ai danni', inputNum(att.bonusDanni, set('bonusDanni')))),
         h('div.griglia2',
           campo('Somma mod. ai danni', selezione([['1', 'Sì'], ['0', 'No (es. trucchetti)']], att.modDanni ? '1' : '0', (v) => set('modDanni')(v === '1'))),
           campo('Gittata', inputTesto(att.gittata, set('gittata')))),

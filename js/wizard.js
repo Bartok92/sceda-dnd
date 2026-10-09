@@ -90,7 +90,7 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
     const arma = R.armaDaId(idArma);
     const ogg = oggettoDaArma(arma); ogg.equip = true;
     pg.inventario.push(ogg);
-    pg.attacchi.push({ id: 'arma1', ...R.attaccoDaArma(pg, arma) });
+    pg.attacchi.push({ id: 'arma1', ...R.attaccoDaArma(pg, arma), oggetto: ogg.id });
     if (R.maestrieMax(pg) > 0) pg.maestrie = [arma.id];
     pg._talentiControllati = true; pg._maestrieControllate = true;
     onFine(pg);

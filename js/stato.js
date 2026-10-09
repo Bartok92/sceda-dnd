@@ -99,6 +99,33 @@ function aggiorna2024(pg) {
     });
     pg._tratti112 = true;
   }
+  // Versione 1.13.0: bonus magico (+1/+2/+3) su armi, armature e scudi. Collego ogni attacco alla sua arma dello zaino
+  // (stessa arma del manuale o stesso nome) e, se il nome dice già "+1" e il bonus era scritto a mano nell'attacco o nella
+  // CA, lo sposto nel nuovo campo dell'oggetto: i totali restano identici.
+  if (!pg._magico113) {
+    const norm = (t) => String(t || '').toLowerCase().replace(/\s*\+\d+\s*/g, ' ').trim();
+    const armi = pg.inventario.filter((o) => o.tipo === 'arma');
+    for (const a of pg.attacchi) {
+      if (a.oggetto !== undefined) continue;
+      const o = armi.find((x) => (a.arma && x.arma === a.arma) || norm(x.nome) === norm(a.nome)) || null;
+      a.oggetto = o ? o.id : null;
+      const n = Number((o?.nome.match(/\+([1-3])\b/) || [])[1]);
+      if (o && n && !Number(o.magico) && Number(a.bonus) === n && Number(a.bonusDanni) === n) { o.magico = n; a.bonus = 0; a.bonusDanni = 0; }
+    }
+    // gli altri attacchi con la stessa arma già convertita non devono più avere il +N scritto a mano
+    for (const a of pg.attacchi) {
+      const o = pg.inventario.find((x) => x.id === a.oggetto);
+      const n = Number(o?.magico) || 0;
+      if (n && Number(a.bonus) === n && Number(a.bonusDanni) === n) { a.bonus = 0; a.bonusDanni = 0; }
+    }
+    for (const o of pg.inventario) {
+      const n = Number((String(o.nome).match(/\+([1-3])\b/) || [])[1]);
+      if (!n || Number(o.magico)) continue;
+      if ((o.tipo === 'armatura' || o.slot === 'armatura') && Number(o.bonusCA) === n) { o.magico = n; o.bonusCA = 0; }
+      else if (o.tipo === 'scudo' && Number(o.bonusCA) === 2 + n) { o.magico = n; o.bonusCA = 2; }
+    }
+    pg._magico113 = true;
+  }
   // Incantesimi presi dal vecchio prontuario (regole 2014) e mai modificati: passano alle regole 2024
   pg.incantesimi.forEach((inc) => {
     if (DESCRIZIONI_2014[inc.nome] == null || inc.descrizione !== DESCRIZIONI_2014[inc.nome]) return;

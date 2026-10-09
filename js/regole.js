@@ -240,6 +240,11 @@ function caConEffetti(pg, v) {
   return Math.max(v, minimo);
 }
 
+// Bonus magico (+1, +2, +3) di un'armatura o di uno scudo: conta nella CA solo quando l'oggetto è equipaggiato
+// Etichetta "+N" da mostrare accanto al nome di un oggetto magico: vuota se il nome dice già "+N" (niente "Spada +1 +1")
+export const etichettaMagico = (nome, n) => (Number(n) && !new RegExp('\\+' + Number(n) + '(?!\\d)').test(nome || '') ? ' +' + Number(n) : '');
+export const bonusMagicoCA = (o) => (o && (o.tipo === 'armatura' || o.tipo === 'scudo' || o.slot === 'armatura') ? Number(o.magico) || 0 : 0);
+
 export function classeArmatura(pg) {
   const ca = pg.ca || {};
   if (ca.modo === 'manuale') return caConEffetti(pg, Number(ca.manuale) || 10);
@@ -261,7 +266,8 @@ export function classeArmatura(pg) {
   }
   // Scudo senza addestramento: per le regole 2024 non dà il bonus alla CA
   const scudoInutile = scudoImbracciato(pg) && automatico(pg, 'scudo-addestramento') && !competenzeEquip(pg).armature.has('scudo');
-  eq.forEach((o) => { if (!(scudoInutile && o === scudoImbracciato(pg))) val += Number(o.bonusCA) || 0; });
+  // bonusCA: scudi (+2), anelli, mantelli…; magico: +1/+2/+3 di armature e scudi magici (vedi bonusMagicoCA)
+  eq.forEach((o) => { if (!(scudoInutile && o === scudoImbracciato(pg))) val += (Number(o.bonusCA) || 0) + bonusMagicoCA(o); });
   return caConEffetti(pg, val + (Number(ca.bonus) || 0));
 }
 
@@ -433,16 +439,19 @@ export function carAttacco(pg, att) {
   if (att.car === 'ACC') return mod(pg.car.DES) > mod(pg.car.FOR) ? 'DES' : 'FOR';
   return att.car;
 }
+// L'arma dello zaino collegata a un attacco (att.oggetto) e il suo bonus magico (+1, +2, +3), che vale per colpire e per i danni
+export const oggettoDiAttacco = (pg, att) => (att?.oggetto ? (pg.inventario || []).find((o) => o.id === att.oggetto) || null : null);
+export const bonusMagicoAttacco = (pg, att) => Number(oggettoDiAttacco(pg, att)?.magico) || 0;
 export function attaccoBonus(pg, att) {
   const c = carAttacco(pg, att);
   let b = c ? mod(pg.car[c]) : 0;
   if (att.comp) b += competenza(pg.livello);
-  return b + (Number(att.bonus) || 0) + sommaEffetti(pg, 'attacco') + malusSfinimento(pg);
+  return b + (Number(att.bonus) || 0) + bonusMagicoAttacco(pg, att) + sommaEffetti(pg, 'attacco') + malusSfinimento(pg);
 }
 // Danni già sommati: "1d12" + FOR 5 + magico 2 → "1d12+7" (se i dadi sono solo un numero, es. colpo senz'armi "1", fa la somma)
 export function attaccoDanni(pg, att, { dadi } = {}) {
   const c = carAttacco(pg, att);
-  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0) + sommaEffetti(pg, 'danni');
+  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0) + bonusMagicoAttacco(pg, att) + sommaEffetti(pg, 'danni');
   const s = String(dadi || dadoDanniAttacco(pg, att) || '').trim() || '1';
   if (/^\d+$/.test(s)) return String(Math.max(1, Number(s) + fisso));
   return fisso ? s + (fisso > 0 ? '+' : '') + fisso : s;
