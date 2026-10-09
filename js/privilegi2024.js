@@ -10,7 +10,8 @@ const ASI = (...livelli) => P(livelli[0], 'Aumento dei punteggi di caratteristic
   'Ottieni il talento Aumento dei punteggi di caratteristica oppure un altro talento per cui hai i requisiti (lo scegli tra i Talenti).',
   { ripeti: livelli.slice(1), id: 'asi' });
 const DONO = (consigliato) => P(19, 'Dono epico', `Ottieni un talento Dono epico oppure un altro talento per cui hai i requisiti. Consigliato: ${consigliato}.`, { id: 'dono-epico' });
-const SOTTO = (id, nome, en, alias, privilegi) => ({ id, nome, en, alias, privilegi });
+// fonte: solo per le sottoclassi che NON sono nel Manuale del Giocatore 2024 (si mostra nel menu e nelle Note)
+const SOTTO = (id, nome, en, alias, privilegi, fonte = '') => ({ id, nome, en, alias, privilegi, fonte });
 
 // ───────────────────────── Privilegi di classe ─────────────────────────
 export const PRIVILEGI_CLASSE = {
@@ -416,6 +417,15 @@ export const SOTTOCLASSI = {
       P(15, 'Anima della vendetta', 'Subito dopo che la creatura sotto il tuo Voto di inimicizia fa un tiro per colpire (che colpisca o manchi), con la reazione puoi fare un attacco in mischia contro di lei, se è a portata.'),
       P(20, 'Angelo vendicatore', 'Azione bonus, per 10 minuti: ali spettrali con velocità di volare 18 m e possibilità di librarti; ogni nemico che inizia il turno nella tua Aura di protezione fa un tiro salvezza su Saggezza o è Spaventato per 1 minuto (o finché subisce danni), e gli attacchi contro di lui hanno vantaggio. Una volta per riposo lungo, oppure spendi uno slot di 5° livello per riusarlo.'),
     ]),
+    // Non è nel Manuale del Giocatore 2024: dal documento OATHBREAKER.docx fornito dall'utente (versione aggiornata della
+    // sottoclasse della Guida del DM 2014). Il documento non descrive il privilegio del 20° livello (Signore del terrore).
+    SOTTO('giuramento-infranto', 'Giuramento Infranto', 'Oathbreaker', ['oathbreaker', 'giuramento infranto', 'infranto'], [
+      P(3, 'Evocare non morti', 'Con un\'azione bonus spendi un uso di Incanalare divinità ed evochi tanti non morti quanto metà del tuo modificatore di Carisma (per eccesso, minimo 1), scheletri o zombi a scelta, in spazi liberi che vedi entro 9 m. Per 1 minuto sono tuoi alleati sotto il tuo controllo, poi diventano cenere. In combattimento agiscono subito dopo il tuo turno e obbediscono ai tuoi ordini a voce (senza azione); senza ordini fanno Schivata ed evitano il pericolo.'),
+      P(3, 'Aspetto terrificante', 'Subito dopo aver lanciato Punizione divina puoi spendere un uso di Incanalare divinità: le creature che scegli in un\'emanazione di 9 m fanno un tiro salvezza su Saggezza o sono Spaventate per 1 minuto; ripetono il tiro alla fine di ogni loro turno.'),
+      P(3, 'Incantesimi del giuramento', 'Hai sempre preparati (non contano nel limite): 3° livello Rimprovero infernale, Dardo stregato; 5° Corona di follia, Oscurità; 9° Paura, Evocare non morti; 13° Avvizzimento, Assassino fantasmatico; 17° Contagio, Colpo del vento d\'acciaio.'),
+      P(7, 'Aura dell\'odio', 'Quando tu, o un immondo o un non morto tuo alleato che si trova nella tua Aura di protezione, colpite una creatura con un attacco in mischia, l\'attacco infligge danni necrotici extra pari al tuo modificatore di Carisma.'),
+      P(15, 'Resistenza soprannaturale', 'Ottieni resistenza ai danni contundenti, perforanti e taglienti.'),
+    ], 'Non è nel Manuale del Giocatore 2024: viene dal documento OATHBREAKER che mi hai fornito (versione aggiornata della sottoclasse della Guida del Dungeon Master 2014). Il documento non descrive il privilegio del 20° livello.'),
   ],
   Ranger: [
     SOTTO('signore-delle-bestie', 'Signore delle Bestie', 'Beast Master', ['signore delle bestie', 'beast master'], [

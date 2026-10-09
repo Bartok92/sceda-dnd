@@ -861,6 +861,7 @@ export function renderNote(c) {
         g.manca ? h('div',
           h('p.nota', g.scritta ? `«${g.scritta}» non è tra le sottoclassi del manuale 2024: scegline una, oppure scrivi i suoi privilegi qui sotto tra i tratti scritti da te.` : 'Dal 3° livello hai una sottoclasse: sceglila per vedere i suoi privilegi.'),
           h('button.btn.piccolo', { onclick: () => scegliSottoclasse(g.classe) }, 'Scegli la sottoclasse')) : null,
+        g.sottoclasse?.fonte ? h('p.nota', g.sottoclasse.fonte) : null,
         g.voci.map((v) => voceTratto(v.nome, v.testo, v.info)))),
       h('div.gruppo-tratti',
         h('h4.sottotitolo', 'Talenti'),
@@ -884,7 +885,7 @@ export function selettoreSottoclasse(classe, valore, onCambia) {
   const nota = sottoclasseDi(classe, valore);
   const inp = h('input.campo', { value: nota ? '' : (valore || ''), placeholder: 'Nome della sottoclasse', hidden: !(valore && !nota) });
   inp.addEventListener('change', () => onCambia(inp.value.trim()));
-  const sel = selezione([['', '— Nessuna —'], ...lista.map((x) => [x.nome, x.nome]), ['__altra', 'Altra (scrivila)']], nota ? nota.nome : (valore ? '__altra' : ''), (v) => {
+  const sel = selezione([['', '— Nessuna —'], ...lista.map((x) => [x.nome, x.nome + (x.fonte ? ' (fuori dal Manuale 2024)' : '')]), ['__altra', 'Altra (scrivila)']], nota ? nota.nome : (valore ? '__altra' : ''), (v) => {
     if (v === '__altra') { inp.hidden = false; inp.focus(); if (inp.value.trim()) onCambia(inp.value.trim()); }
     else { inp.hidden = true; onCambia(v); }
   });
@@ -896,7 +897,8 @@ function scegliSottoclasse(classe) {
   pannello(`Sottoclasse del ${classe}`, (c, chiudi) => {
     c.append(h('p.nota', 'Tocca una sottoclasse per vedere i suoi privilegi, poi scegli.'),
       (SOTTOCLASSI[classe] || []).map((sc) => h('details.tratto',
-        h('summary', sc.nome, h('small.tratto-info', sc.en)),
+        h('summary', sc.nome, h('small.tratto-info', sc.en + (sc.fonte ? ' · fuori dal Manuale 2024' : ''))),
+        sc.fonte ? h('p.nota', sc.fonte) : null,
         sc.privilegi.map((pr) => h('p', h('strong', `${pr.liv}° · ${pr.nome}: `), pr.testo)),
         h('button.btn.primario', { onclick: () => {
           modifica((x) => {
