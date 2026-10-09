@@ -1352,3 +1352,10 @@ button.stat-box:active { transform: scale(.96); }
 .riga-privilegio { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--linea); color: var(--testo); }
 .riga-privilegio .liv { font: 700 .95rem var(--font-titoli); color: var(--titolo); text-align: right; }
 .riga-privilegio.futuro { opacity: .5; }
+
+/* Note → Tratti e privilegi automatici (manuale 2024) */
+.gruppo-tratti { margin: 4px 0 14px; }
+.gruppo-tratti > .sottotitolo { margin: 14px 0 2px; }
+.tratto-info { margin-left: 8px; font-weight: 400; font-size: .8rem; color: var(--testo-3); }
+.tratto[open] .tratto-info { color: var(--testo-2); }
+.selettore-sottoclasse { display: flex; flex-direction: column; gap: 6px; }

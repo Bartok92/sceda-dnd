@@ -7,6 +7,7 @@ import { tira, selettoreModo } from './dadi.js';
 import { ico } from './icone.js';
 import { INCANTESIMI_BASE } from './incantesimi-base.js';
 import * as E from './effetti.js';
+import { SOTTOCLASSI, TALENTI, CATEGORIE_TALENTI, talentoDaId, sottoclasseDi, gruppiTratti, talentiDelPg, privilegiSottoclasseAlLivello } from './privilegi2024.js';
 import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento, privilegiAlLivello, PRIVILEGI_LIVELLO } from './dati2024.js';
 
 const pg = () => stato.pg;
@@ -81,13 +82,15 @@ function saliDiLivello() {
         chiudi(); avviso(`Ora sei di livello ${p.livello} (${cl.classe} ${cl.livello + 1})! +${pf} PF massimi`);
         if (cambiate.length) setTimeout(() => avviso('Risorse aggiornate: ' + cambiate.join(', ')), 1200);
       };
-      const nuovi = privilegiAlLivello(cl.classe, cl.livello + 1);
+      const nuovi = [...privilegiAlLivello(cl.classe, cl.livello + 1).filter((n) => n !== 'Privilegio della sottoclasse'),
+        ...privilegiSottoclasseAlLivello(cl.classe, cl.sottoclasse, cl.livello + 1).map((n) => `${n} (${sottoclasseDi(cl.classe, cl.sottoclasse).nome})`)];
+      if (privilegiAlLivello(cl.classe, cl.livello + 1).includes('Privilegio della sottoclasse') && !sottoclasseDi(cl.classe, cl.sottoclasse)) nuovi.push('Privilegio della sottoclasse (scegli la sottoclasse per vederlo)');
       c.replaceChildren(h('p', `${cl.classe} ${cl.livello} → ${cl.livello + 1}. Aumenta i punti ferita massimi: dado vita d${dv} ${R.segno(m)} (Costituzione)${extra ? ` ${R.segno(extra)} (talenti/specie)` : ''}.`),
         h('div.riga-btn',
           h('button.btn.grande', { onclick: () => applica(media) }, `Usa la media (+${media})`),
           h('button.btn.grande.primario', { onclick: () => { const r = tira(`1d${dv}`, 'Dado vita (livello)'); applica(Math.max(1, r.totale + m) + extra); } }, `Tira 1d${dv}`)),
         nuovi.length ? h('div.box-info', h('strong', `Al ${cl.livello + 1}° livello da ${cl.classe} ottieni:`), h('ul.lista-privilegi', nuovi.map((n) => h('li', n)))) : null,
-        h('p.nota', 'Scrivi i nuovi privilegi nei Tratti (Eroe) e, se sei un incantatore, scegli i nuovi incantesimi. Slot, risorse e automatismi si aggiornano da soli.'));
+        h('p.nota', 'Le descrizioni sono in Note → Tratti e privilegi, che si aggiorna da solo. Se sei un incantatore, scegli i nuovi incantesimi. Slot, risorse e automatismi si aggiornano da soli.'));
     };
     const classi = R.elencoClassi(p);
     if (classi.length === 1) return scegliPF(classi[0]);
@@ -105,6 +108,7 @@ export function apriModificaBase() {
     // ── Multiclasse: le classi aggiunte dopo la prima. Cambiare i loro livelli cambia il livello totale,
     // così il livello della classe iniziale resta quello scritto sopra.
     const boxMulti = h('div.box-multiclasse');
+    const boxSottoclasse = h('div', selettoreSottoclasse(p.classe, p.sottoclasse, (v) => agg((x) => (x.sottoclasse = v))));
     const cambiaMulti = (fn) => agg((x) => { const prima = R.livelloClasseIniziale(x); x.multiclasse ||= []; fn(x.multiclasse, x); x.livello = Math.min(20, prima + R.livelliMulticlasse(x)); });
     function disegnaMulti() {
       const q = pg(); const lista = q.multiclasse || [];
@@ -118,7 +122,7 @@ export function apriModificaBase() {
             })),
             campo('Livelli', inputNum(mc.livello, (v) => { cambiaMulti((l) => { const y = l[i]; const nuovo = Math.max(1, v); y.dvRimasti = Math.max(0, Math.min(nuovo, (y.dvRimasti ?? y.livello) + nuovo - y.livello)); y.livello = nuovo; }); disegnaMulti(); }, { min: 1, max: 19 }))),
           h('div.griglia2',
-            campo('Sottoclasse', inputTesto(mc.sottoclasse, (v) => cambiaMulti((l) => (l[i].sottoclasse = v)), { placeholder: 'Es. Campione' })),
+            campo('Sottoclasse', selettoreSottoclasse(mc.classe, mc.sottoclasse, (v) => cambiaMulti((l) => (l[i].sottoclasse = v)))),
             h('button.btn.piccolo.pericolo', { onclick: () => { cambiaMulti((l) => l.splice(i, 1)); disegnaMulti(); } }, '✕ Togli classe')))),
         h('button.btn.piccolo', { onclick: () => {
           if (q.livello >= 20) return avviso('Sei già al livello 20.', 'errore');
@@ -132,12 +136,13 @@ export function apriModificaBase() {
       campo('Nome', inputTesto(p.nome, (v) => agg((x) => (x.nome = v || 'Senza nome')))),
       h('div.griglia2',
         campo('Razza', inputTesto(p.razza, (v) => agg((x) => (x.razza = v)), { list: 'razze' })),
-        campo('Classe', selezione(Object.keys(R.CLASSI), p.classe, (v) => agg((x) => {
+        campo('Classe', selezione(Object.keys(R.CLASSI), p.classe, (v) => { agg((x) => {
           x.classe = v; const cl = R.CLASSI[v];
           x.dadiVita.tipo = cl.dv; x.tsComp = [...cl.ts]; x.magia.tipo = cl.magia; x.magia.car = cl.carMagia;
-        })))),
+          if (!sottoclasseDi(v, x.sottoclasse)) x.sottoclasse = '';
+        }); boxSottoclasse.replaceChildren(selettoreSottoclasse(v, pg().sottoclasse, (s2) => agg((x) => (x.sottoclasse = s2)))); }))),
       h('div.griglia2',
-        campo('Sottoclasse', inputTesto(p.sottoclasse, (v) => agg((x) => (x.sottoclasse = v)))),
+        campo('Sottoclasse', boxSottoclasse),
         campo('Background', inputTesto(p.background, (v) => agg((x) => (x.background = v))))),
       h('div.griglia2',
         campo(p.multiclasse?.length ? `Livello da ${p.classe}` : 'Livello', inputNum(R.livelloClasseIniziale(p), (v) => { agg((x) => (x.livello = Math.max(1, Math.min(20 - R.livelliMulticlasse(x), v)) + R.livelliMulticlasse(x))); disegnaMulti(); }, { min: 1, max: 20 })),
@@ -839,15 +844,131 @@ function modificaIncantesimo(s) {
 
 // ───────────────────────── Note e tratti ─────────────────────────
 
+// Una voce che si apre toccandola: titolo evidenziato e descrizione sotto
+function voceTratto(nome, testo, info, ...extra) {
+  return h('details.tratto', h('summary', nome, info ? h('small.tratto-info', info) : null), h('p', testo), ...extra);
+}
+
 export function renderNote(c) {
   const p = pg();
+  const gruppi = gruppiTratti(p);
+  const talenti = talentiDelPg(p);
   c.append(
     card('Tratti e privilegi',
-      p.tratti.length ? p.tratti.map((t) => h('details.tratto', h('summary', t.titolo), h('p', t.testo), h('button.btn-link', { onclick: () => modificaTratto(t) }, '✎ Modifica'))) : h('p.vuoto', 'Aggiungi i privilegi di razza e classe, i talenti, il background…'),
-      h('button.btn.aggiungi', { onclick: () => modificaTratto() }, '+ Aggiungi tratto'),
+      h('p.nota', 'Tratti della specie e privilegi di classe e sottoclasse secondo il Manuale del Giocatore 2024, fino al tuo livello: si aggiornano da soli. Tocca un tratto per leggerne la descrizione (riassunta dal manuale).'),
+      gruppi.map((g) => h('div.gruppo-tratti',
+        h('h4.sottotitolo', g.titolo),
+        g.manca ? h('div',
+          h('p.nota', g.scritta ? `«${g.scritta}» non è tra le sottoclassi del manuale 2024: scegline una, oppure scrivi i suoi privilegi qui sotto tra i tratti scritti da te.` : 'Dal 3° livello hai una sottoclasse: sceglila per vedere i suoi privilegi.'),
+          h('button.btn.piccolo', { onclick: () => scegliSottoclasse(g.classe) }, 'Scegli la sottoclasse')) : null,
+        g.voci.map((v) => voceTratto(v.nome, v.testo, v.info)))),
+      h('div.gruppo-tratti',
+        h('h4.sottotitolo', 'Talenti'),
+        talenti.length ? talenti.map((t) => voceTratto(t.nome, t.testo, t.fonte,
+          t.req ? h('p.nota', 'Requisiti: ' + t.req) : null,
+          t.uid ? h('button.btn-link', { onclick: () => togliTalento(t.uid) }, 'Togli questo talento') : null))
+          : h('p.vuoto', 'Nessun talento.'),
+        h('button.btn.aggiungi', { onclick: aggiungiTalento }, '+ Aggiungi un talento dal manuale')),
+      h('div.gruppo-tratti',
+        h('h4.sottotitolo', 'Altri tratti (scritti da te)'),
+        p.tratti.length ? p.tratti.map((t) => voceTratto(t.titolo, t.testo, '', h('button.btn-link', { onclick: () => modificaTratto(t) }, '✎ Modifica')))
+          : h('p.vuoto', 'Doni, cicatrici, oggetti speciali o privilegi che non sono nel manuale.'),
+        h('button.btn.aggiungi', { onclick: () => modificaTratto() }, '+ Aggiungi tratto')),
       h('button.btn.piccolo', { onclick: apriPrivilegiClasse }, '📜 Privilegi di classe per livello')),
     card('Note libere', areaTesto(p.note, (v) => modifica((x) => (x.note = v), 'silenzio'), { rows: 12, placeholder: 'Storia, alleati, missioni, indizi…' })));
 }
+
+// Menu della sottoclasse: le quattro del manuale 2024 per quella classe, oppure "Altra" scritta a mano
+export function selettoreSottoclasse(classe, valore, onCambia) {
+  const lista = SOTTOCLASSI[classe] || [];
+  const nota = sottoclasseDi(classe, valore);
+  const inp = h('input.campo', { value: nota ? '' : (valore || ''), placeholder: 'Nome della sottoclasse', hidden: !(valore && !nota) });
+  inp.addEventListener('change', () => onCambia(inp.value.trim()));
+  const sel = selezione([['', '— Nessuna —'], ...lista.map((x) => [x.nome, x.nome]), ['__altra', 'Altra (scrivila)']], nota ? nota.nome : (valore ? '__altra' : ''), (v) => {
+    if (v === '__altra') { inp.hidden = false; inp.focus(); if (inp.value.trim()) onCambia(inp.value.trim()); }
+    else { inp.hidden = true; onCambia(v); }
+  });
+  return h('div.selettore-sottoclasse', sel, inp);
+}
+
+// Scelta della sottoclasse dalla sezione Note (con l'elenco dei privilegi di ognuna)
+function scegliSottoclasse(classe) {
+  pannello(`Sottoclasse del ${classe}`, (c, chiudi) => {
+    c.append(h('p.nota', 'Tocca una sottoclasse per vedere i suoi privilegi, poi scegli.'),
+      (SOTTOCLASSI[classe] || []).map((sc) => h('details.tratto',
+        h('summary', sc.nome, h('small.tratto-info', sc.en)),
+        sc.privilegi.map((pr) => h('p', h('strong', `${pr.liv}° · ${pr.nome}: `), pr.testo)),
+        h('button.btn.primario', { onclick: () => {
+          modifica((x) => {
+            if (x.classe === classe) x.sottoclasse = sc.nome;
+            else { const m = (x.multiclasse || []).find((y) => y.classe === classe); if (m) m.sottoclasse = sc.nome; }
+          });
+          chiudi(); avviso(`Sottoclasse: ${sc.nome}`);
+        } }, `Scegli ${sc.nome}`))));
+  }, { pieno: true });
+}
+
+// Aggiungere un talento dall'elenco del manuale (con descrizione e requisiti)
+function aggiungiTalento() {
+  const p = pg();
+  pannello('Aggiungi un talento', (c, chiudi) => {
+    let cat = 'tutti';
+    const cerca = h('input.campo', { placeholder: 'Cerca…', type: 'search' });
+    const lista = h('div');
+    const disegna = () => {
+      const q = cerca.value.trim().toLowerCase();
+      const scelti = talentiDelPg(pg()).map((t) => t.id);
+      const voci = TALENTI.filter((t) => (cat === 'tutti' || t.cat === cat) && (!q || t.nome.toLowerCase().includes(q) || t.en.toLowerCase().includes(q)));
+      lista.replaceChildren(...Object.keys(CATEGORIE_TALENTI).filter((k) => voci.some((t) => t.cat === k)).map((k) => h('div.gruppo-tratti',
+        h('h4.sottotitolo', CATEGORIE_TALENTI[k]),
+        voci.filter((t) => t.cat === k).map((t) => {
+          const ha = scelti.includes(t.id);
+          const livelloReq = Number((t.req.match(/Livello (\d+)/) || [])[1] || 1);
+          return voceTratto(t.nome, t.testo, t.en + (ha ? ' · ce l\'hai' : ''),
+            t.req ? h('p.nota', 'Requisiti: ' + t.req + (livelloReq > p.livello ? ` (sei di livello ${p.livello})` : '')) : null,
+            t.ripetibile ? h('p.nota', 'Si può prendere più volte: ' + t.ripetibile) : null,
+            h('button.btn.primario', { onclick: () => {
+              if (ha && !t.ripetibile) return avviso(`Hai già ${t.nome}`, 'errore');
+              aggiungiTalentoAlPg(t); chiudi();
+            } }, `Aggiungi ${t.nome}`));
+        }))));
+    };
+    cerca.addEventListener('input', disegna);
+    const chips = h('div.chips.piccoli', [['tutti', 'Tutti'], ...Object.entries(CATEGORIE_TALENTI)].map(([k, n]) => h('button.chip' + (k === cat ? '.attivo' : ''), { onclick: (e) => {
+      cat = k; chips.querySelectorAll('.chip').forEach((b) => b.classList.toggle('attivo', b === e.currentTarget)); disegna();
+    } }, n)));
+    c.append(h('p.nota', 'Gli aumenti di caratteristica e le competenze che un talento dà li segni tu nella scheda (✎ Modifica punteggi, abilità). Robusto, Allerta, Fortunato, Rissaiolo e Iniziato alla magia hanno anche l\'effetto automatico.'), cerca, chips, lista);
+    disegna();
+  }, { pieno: true });
+}
+function aggiungiTalentoAlPg(t) {
+  const auto = R.TALENTI_AUTOMATICI.includes(t.id);
+  modifica((x) => {
+    (x.talentiScelti ||= []).push({ uid: nuovoId(), id: t.id });
+    if (auto && !(x.talenti || []).includes(t.id)) {
+      (x.talenti ||= []).push(t.id);
+      if (t.id === 'robusto') { x.pf.max += 2 * x.livello; x.pf.att += 2 * x.livello; }   // Robusto: +2 PF per livello, subito
+    }
+    if (auto) { const d = R.confrontaRisorse(x); R.applicaRisorse(x, d); }
+  });
+  avviso(`Talento aggiunto: ${t.nome}` + (t.id === 'robusto' ? ` (+${2 * pg().livello} PF massimi)` : ''));
+}
+function togliTalento(uid) {
+  const p = pg();
+  const s = (p.talentiScelti || []).find((x) => x.uid === uid);
+  if (!s) return;
+  modifica((x) => {
+    x.talentiScelti = x.talentiScelti.filter((y) => y.uid !== uid);
+    // l'effetto automatico resta se il talento viene anche dal background o è scelto un'altra volta
+    const bg = BACKGROUND_PG(x);
+    if ((x.talenti || []).includes(s.id) && bg !== s.id && !x.talentiScelti.some((y) => y.id === s.id)) {
+      x.talenti = x.talenti.filter((id) => id !== s.id);
+      if (s.id === 'robusto') { x.pf.max = Math.max(1, x.pf.max - 2 * x.livello); x.pf.att = Math.min(x.pf.att, x.pf.max); }
+    }
+  });
+  avviso(`Talento tolto: ${talentoDaId(s.id)?.nome || s.id}`);
+}
+const BACKGROUND_PG = (x) => talentiDelPg({ background: x.background }).find((t) => t.fonte.startsWith('background'))?.id || null;
 
 // Elenco dei privilegi di classe (tabelle del Manuale del Giocatore 2024): quelli già ottenuti e i prossimi
 function apriPrivilegiClasse() {

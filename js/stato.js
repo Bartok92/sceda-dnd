@@ -1,7 +1,7 @@
 // Stato dell'app: personaggio corrente, salvataggio automatico, notifiche di cambiamento.
 import { db, nuovoId } from './db.js';
 import * as R from './regole.js';
-import { TALENTI_ORIGINE } from './dati2024.js';
+import { TALENTI_ORIGINE, SPECIE } from './dati2024.js';
 import { INCANTESIMI_BASE, DESCRIZIONI_2014 } from './incantesimi-base.js';
 
 export const stato = { pg: null, tab: 'eroe' };
@@ -48,6 +48,7 @@ export function personaggioVuoto() {
     risorse: [], tratti: [], competenzeAltre: '', note: '',
     talenti: [], maestrie: [],   // talenti con effetto automatico; armi di cui si usa la maestria (id del manuale)
     automatismiOff: [],          // regole automatiche spente a mano (vedi R.AUTOMATISMI)
+    talentiScelti: [],           // talenti aggiunti dall'elenco del manuale: [{ uid, id }] (vedi privilegi2024.js)
     modelli: [], animazione: '', tema: '',   // tema: '' = segue il tema generale
     effetti: [], concentrazione: null,       // effetti ricevuti (Scudo della fede…) e concentrazione di chi lancia (effetti.js)
     storicoDadi: [],
@@ -86,6 +87,17 @@ function aggiorna2024(pg) {
     if (aura && scritto === aura) pg.bonusTiriSalvezza = 0;
     else if (aura && scritto > 0 && !pg.automatismiOff.includes('aura-protezione')) pg.automatismiOff.push('aura-protezione');
     pg._aura110 = true;
+  }
+  // Versione 1.12.0: i tratti della specie e il talento delle origini che la creazione guidata scriveva nei tratti
+  // ora si vedono da soli in Note → Tratti e privilegi. Tolgo i doppioni, ma solo se nessuno li ha modificati.
+  if (!pg._tratti112) {
+    const sp = SPECIE[pg.razza];
+    pg.tratti = pg.tratti.filter((t) => {
+      if (sp?.tratti.some((x) => t.titolo === `${x.titolo} (${pg.razza})` && t.testo === x.testo)) return false;
+      if (Object.values(TALENTI_ORIGINE).some((x) => t.titolo === `${x.nome} (talento delle origini)` && t.testo === x.testo)) return false;
+      return true;
+    });
+    pg._tratti112 = true;
   }
   // Incantesimi presi dal vecchio prontuario (regole 2014) e mai modificati: passano alle regole 2024
   pg.incantesimi.forEach((inc) => {

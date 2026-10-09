@@ -7,6 +7,7 @@ import { esegui } from './dadi.js';
 import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE, COSTO_PUNTI, PUNTI_DISPONIBILI } from './dati2024.js';
 import { oggettoDaArma } from './zaino.js';
 import { sigillo } from './icone.js';
+import { selettoreSottoclasse } from './scheda.js';
 
 // Arma di partenza suggerita per classe (se la Destrezza è più alta, per Guerriero e Ladro un'arma a distanza/accurata)
 const ARMA_PARTENZA = { Barbaro: 'ascia-bipenne', Bardo: 'pugnale', Chierico: 'mazza', Druido: 'falcetto', Guerriero: 'spada-lunga', Ladro: 'spada-corta',
@@ -66,14 +67,11 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
     const altre = [];
     if (specie) {
       pg.velocita = specie.vel;
-      specie.tratti.forEach((t) => pg.tratti.push({ id: nuovoId(), titolo: `${t.titolo} (${pg.razza})`, testo: t.testo }));
       altre.push(`Taglia: ${specie.taglia}.`);
       if (pg.razza === 'Umano') pg.ispirazione = true; // Intraprendente: Ispirazione eroica
     }
     if (b) {
       b.abilita.forEach((id) => (pg.abilita[id] = 1));
-      const t = TALENTI_ORIGINE[b.talento];
-      pg.tratti.push({ id: nuovoId(), titolo: `${t.nome} (talento delle origini)`, testo: t.testo });
       if (R.TALENTI_AUTOMATICI.includes(b.talento)) pg.talenti.push(b.talento);
       altre.push(`Strumento (${b.nome}): ${b.strumento}.`);
     }
@@ -125,7 +123,7 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
       COMPETENZE_CLASSE[pg.classe] ? h('p.nota', COMPETENZE_CLASSE[pg.classe].testo) : null,
       h('div.griglia2',
         campo('Livello di partenza', contatore(pg.livello, (v) => (pg.livello = v), { min: 1, max: 20 })),
-        campo('Sottoclasse (facoltativa)', (() => { const i = h('input.campo', { value: pg.sottoclasse }); i.addEventListener('change', () => (pg.sottoclasse = i.value)); return i; })())));
+        campo('Sottoclasse (dal 3° livello)', selettoreSottoclasse(pg.classe, pg.sottoclasse, (v) => (pg.sottoclasse = v)))));
   }
 
   function passoCar(c) {

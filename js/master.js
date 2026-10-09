@@ -11,6 +11,7 @@
 import { h, avviso, pannello, conferma, tastierino, vibra, chiediTesto, scegliFile } from './ui.js';
 import { db, nuovoId } from './db.js';
 import * as R from './regole.js';
+import { gruppiTratti, talentiDelPg } from './privilegi2024.js';
 import { esegui } from './dadi.js';
 import { ico, sigillo } from './icone.js';
 import * as T from './tavolo.js';
@@ -440,7 +441,12 @@ function contenutoScheda(id) {
       (pg.inventario || []).length ? h('div.sl-lista', pg.inventario.map((o) => h('details.sl-dettaglio',
         h('summary', o.nome, (o.qta || 1) > 1 ? ` ×${o.qta}` : '', o.equip ? h('span.badge.oro', 'in uso') : null),
         o.descrizione ? h('p', o.descrizione) : h('p.nota', 'Nessuna descrizione')))) : h('p.nota', 'Zaino vuoto.')),
-    (pg.tratti || []).length ? sezione('Tratti e privilegi', pg.tratti.map((t) => h('details.sl-dettaglio', h('summary', t.titolo), h('p', t.testo)))) : null,
+    sezione('Tratti e privilegi', [
+      ...gruppiTratti(pg).map((g) => [h('h4.sottotitolo', g.titolo),
+        g.manca ? h('p.nota', 'Sottoclasse non scelta' + (g.scritta ? `: «${g.scritta}»` : '')) : null,
+        g.voci.map((v) => h('details.sl-dettaglio', h('summary', v.nome, v.info ? h('small.tratto-info', v.info) : null), h('p', v.testo)))]),
+      talentiDelPg(pg).length ? [h('h4.sottotitolo', 'Talenti'), talentiDelPg(pg).map((t) => h('details.sl-dettaglio', h('summary', t.nome), h('p', t.testo)))] : null,
+      (pg.tratti || []).length ? [h('h4.sottotitolo', 'Scritti dal giocatore'), pg.tratti.map((t) => h('details.sl-dettaglio', h('summary', t.titolo), h('p', t.testo)))] : null]),
     pg.competenzeAltre ? sezione('Altre competenze e linguaggi', h('p.sl-testo', pg.competenzeAltre)) : null,
     pg.note ? sezione('Note del giocatore', h('p.sl-testo', pg.note)) : null,
     m && !T.presente(id) ? h('p.nota.centrato', 'Il giocatore non è collegato: vedi l\'ultima versione ricevuta.') : null);
