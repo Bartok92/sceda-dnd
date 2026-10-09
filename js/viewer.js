@@ -108,7 +108,7 @@ function creaRenderer() {
 
   scena = new THREE.Scene();
   scena.fog = new THREE.Fog(0x120709, 6, 14);
-  camera = new THREE.PerspectiveCamera(35, 1, 0.05, 50);
+  camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);   // piano vicino 1 cm: si può zoomare fin sul viso senza tagliare il modello
   camera.position.set(0, 1.3, 4.2);
   orologio = new THREE.Clock();
 
@@ -128,13 +128,19 @@ function creaRenderer() {
   gruppoPersonaggio = new THREE.Group();
   scena.add(gruppoPersonaggio);
 
+  // Zoom libero: due dita allargano/stringono (zoom verso il punto toccato) e trascinano (spostano la visuale);
+  // sul computer rotellina verso il puntatore e tasto destro per spostare. Doppio tocco: ricentra.
   controlli = new THREE.OrbitControls(camera, renderer.domElement);
-  controlli.enablePan = false;
+  controlli.enablePan = true;
+  controlli.screenSpacePanning = true;
+  controlli.zoomToCursor = true;
   controlli.enableDamping = true;
   controlli.dampingFactor = 0.08;
   controlli.rotateSpeed = 0.7;
-  controlli.minDistance = 0.4;
-  controlli.maxDistance = 9;
+  controlli.zoomSpeed = 1.1;
+  controlli.panSpeed = 0.9;
+  controlli.minDistance = 0.12;
+  controlli.maxDistance = 12;
   controlli.maxPolarAngle = Math.PI * 0.56;
   controlli.target.set(0, 0.95, 0);
   controlli.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
@@ -305,7 +311,19 @@ function fotogramma() {
     if (camera.position.distanceTo(obiettivoCamera.pos) < 0.005) obiettivoCamera = null;
   }
   controlli.update();
+  limitaVisuale();
   if (qualita.bagliore) compositore.render(dt); else renderer.render(scena, camera);
+}
+
+// Spostando la visuale il punto guardato resta vicino al personaggio (così non lo si perde di vista)
+const LIMITI_VISUALE = new THREE.Box3(new THREE.Vector3(-1.6, -0.3, -1.6), new THREE.Vector3(1.6, 2.9, 1.6));
+const _vicino = new THREE.Vector3();
+function limitaVisuale() {
+  if (LIMITI_VISUALE.containsPoint(controlli.target)) return;
+  LIMITI_VISUALE.clampPoint(controlli.target, _vicino);
+  const spostamento = _vicino.sub(controlli.target);
+  controlli.target.add(spostamento);
+  camera.position.add(spostamento);
 }
 
 export function ricentra() {
@@ -580,3 +598,5 @@ export function applicaRegolazione(id, reg) {
 export const oggettoAgganciato = (id) => attaccati.get(id)?.inner || null;
 export const modelloCorrente = () => mod;
 export const pronto = () => !!renderer;
+// Posizione della telecamera (per le prove): distanza dal punto guardato, punto guardato e posizione
+export const statoCamera = () => (camera ? { distanza: +camera.position.distanceTo(controlli.target).toFixed(3), target: controlli.target.toArray().map((v) => +v.toFixed(3)), pos: camera.position.toArray().map((v) => +v.toFixed(3)) } : null);

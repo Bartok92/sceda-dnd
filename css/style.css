@@ -1359,3 +1359,6 @@ button.stat-box:active { transform: scale(.96); }
 .tratto-info { margin-left: 8px; font-weight: 400; font-size: .8rem; color: var(--testo-3); }
 .tratto[open] .tratto-info { color: var(--testo-2); }
 .selettore-sottoclasse { display: flex; flex-direction: column; gap: 6px; }
+
+/* Vista 3D: pulsanti in basso (ricentra, ingrandisci) */
+.ov-pulsanti { display: flex; gap: 8px; flex-shrink: 0; }

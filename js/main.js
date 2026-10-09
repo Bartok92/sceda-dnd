@@ -14,7 +14,7 @@ import * as T from './tavolo.js';
 import * as E from './effetti.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.12.1';
+export const VERSIONE_APP = '1.12.2';
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
 const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
@@ -391,8 +391,10 @@ function aggiornaOverlay3D() {
       }, { class: 'sel-anim' }) : h('span'),
       h('button.btn.piccolo.vetro', { onclick: () => modelli?.apriGestioneModelli() }, ico('figura'), 'Modelli 3D')) : null,
     !senzaModello ? h('div.ov-basso',
-      h('span.suggerimento3d', '1 dito ruota · 2 dita zoom · doppio tocco ricentra'),
-      h('button.btn-icona.vetro', { 'aria-label': 'Ingrandisci', onclick: () => strutturaScheda.vista.classList.toggle('espansa') }, ico('espandi'))) : null);
+      h('span.suggerimento3d', '1 dito ruota · 2 dita zoom e sposta · doppio tocco ricentra'),
+      h('div.ov-pulsanti',
+        h('button.btn-icona.vetro', { 'aria-label': 'Ricentra', onclick: async () => (await modelli.viewer()).ricentra() }, ico('centra')),
+        h('button.btn-icona.vetro', { 'aria-label': 'Ingrandisci', onclick: () => strutturaScheda.vista.classList.toggle('espansa') }, ico('espandi')))) : null);
 }
 
 // ───────────────────────── Avvio ─────────────────────────

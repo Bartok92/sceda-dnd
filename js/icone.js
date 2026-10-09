@@ -24,6 +24,7 @@ const P = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   chiudi: '<path d="M6 6l12 12M18 6L6 18"/>',
   espandi: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
+  centra: '<circle cx="12" cy="12" r="6.4"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3"/>',
   amuleto: '<path d="M6.8 3c.2 4.8 2.3 7.8 5.2 8.8 2.9-1 5-4 5.2-8.8"/><path d="M12 11.8l3.2 3.9L12 20.6l-3.2-4.9z"/>',
   spada: '<path d="M20 4l-9.4 9.4"/><path d="M20 4h-3.4M20 4v3.4"/><path d="M7.6 11.8l4.6 4.6"/><path d="M9.9 14.1L4.4 19.6"/>',
   borsa: '<path d="M5 9.2h14v9.4a1.6 1.6 0 0 1-1.6 1.6H6.6A1.6 1.6 0 0 1 5 18.6z"/><path d="M5 9.2L7.3 4.8h9.4L19 9.2"/><path d="M9.6 13.2h4.8"/>',
