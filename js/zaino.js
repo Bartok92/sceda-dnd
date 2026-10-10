@@ -3,8 +3,10 @@ import { h, pannello, conferma, avviso, selezione, campo, fmtKg, fmtMB, scegliFi
 import { stato, modifica } from './stato.js';
 import { nuovoId, db } from './db.js';
 import * as R from './regole.js';
-import { inputNum, inputTesto, areaTesto, card, selettoreArma, schedaArma, testoProprieta } from './scheda.js';
+import { inputNum, inputTesto, areaTesto, card, selettoreArma, schedaArma, testoProprieta, applicaPF } from './scheda.js';
 import { ARMI, ARMATURE, CATEGORIE_ARMI, MAESTRIE } from './dati2024.js';
+import { EQUIPAGGIAMENTO, CATEGORIE_EQUIP } from './equipaggiamento2024.js';
+import { tira } from './dadi.js';
 import { ico } from './icone.js';
 
 const ICONE_SLOT = { testa: 'eroe', collo: 'amuleto', schiena: 'zaino', manoDx: 'spada', manoSx: 'scudo', cintura: 'borsa', armatura: 'armatura' };
@@ -17,19 +19,42 @@ const descrArmatura = (a) => a.tipo === 'scudo' ? '+2 alla CA.'
   : `CA ${a.base}${a.tipo === 'leggera' ? ' + DES' : a.tipo === 'media' ? ' + DES (max 2)' : ''} · armatura ${a.tipo}${a.forza ? ` · serve Forza ${a.forza}` : ''}${a.furtivita ? ' · svantaggio a Furtività' : ''}`;
 const oggettoBase = () => ({ id: nuovoId(), qta: 1, equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, magico: 0, versioneModello: '' });
 export const oggettoDaArma = (a) => ({ ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArma(a), tipo: 'arma', slot: 'manoDx', arma: a.id });
+// Oggetto dell'equipaggiamento d'avventura (munizioni: il peso del manuale è quello della confezione intera)
+export const oggettoDaEquip = (e, qta = e.qta || 1) => ({ ...oggettoBase(), nome: e.qta ? e.nome.replace(/\s*\(\d+\)$/, '') : e.nome, qta,
+  peso: Math.round((e.pesoTot ? e.peso / (e.qta || 1) : e.peso) * 1000) / 1000, descrizione: e.descr,
+  tipo: e.cat === 'consumabili' ? 'consumabile' : 'oggetto', slot: '', equipId: e.id, ...(e.usa?.cura ? { cura: e.usa.cura } : {}) });
 export const oggettoDaArmatura = (a) => a.tipo === 'scudo'
   ? { ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArmatura(a), tipo: 'scudo', slot: 'manoSx', bonusCA: 2, armaturaId: a.id }
   : { ...oggettoBase(), nome: a.nome, peso: a.peso, descrizione: descrArmatura(a), tipo: 'armatura', slot: 'armatura',
     armatura: { base: a.base, tipo: a.tipo, forza: a.forza, furtivita: a.furtivita }, armaturaId: a.id };
 
+// Elenco dell'equipaggiamento d'avventura del manuale, diviso per categoria, con ricerca
+function listaEquip(leggiCerca, scriviCerca) {
+  const lista = h('div');
+  const inp = h('input.campo', { type: 'search', placeholder: 'Cerca (es. corda, pozione, torcia)…', value: leggiCerca() });
+  const disegna = () => {
+    const q = inp.value.trim().toLowerCase(); scriviCerca(inp.value);
+    const voci = EQUIPAGGIAMENTO.filter((e) => !q || e.nome.toLowerCase().includes(q) || e.en.toLowerCase().includes(q));
+    lista.replaceChildren(...CATEGORIE_EQUIP.filter(([k]) => voci.some((e) => e.cat === k)).map(([k, et]) => h('div', h('h4.sottotitolo', et),
+      voci.filter((e) => e.cat === k).map((e) => h('button.voce-prontuario', { onclick: () => {
+        modifica((x) => x.inventario.push(oggettoDaEquip(e)));
+        avviso(`Aggiunto allo zaino: ${e.nome}`);
+      } }, h('strong', e.nome), h('small', `${e.peso ? fmtKg(e.peso) : 'peso trascurabile'} · ${e.costo}${e.descr ? ' · ' + e.descr : ''}`))))),
+      voci.length ? null : h('p.vuoto', 'Nessun oggetto trovato.'));
+  };
+  inp.addEventListener('input', disegna);
+  disegna();
+  return h('div', h('p.nota', 'Equipaggiamento d\'avventura del manuale 2024. Le pozioni di guarigione si usano dallo zaino con il tasto "Usa".'), inp, lista);
+}
+
 function apriManuale() {
-  let scheda = 'armi'; let creaAttacco = true;
+  let scheda = 'armi'; let creaAttacco = true; let cerca = '';
   pannello('Dal manuale 2024', (c) => {
     const disegna = () => {
       const p = pg();
       c.replaceChildren(
-        h('div.segmenti.larghi', [['armi', 'Armi'], ['armature', 'Armature e scudi']].map(([v, t]) => h('button' + (scheda === v ? '.attivo' : ''), { onclick: () => { scheda = v; disegna(); } }, t))),
-        scheda === 'armi' ? [
+        h('div.segmenti.larghi', [['armi', 'Armi'], ['armature', 'Armature'], ['equip', 'Equipaggiamento']].map(([v, t]) => h('button' + (scheda === v ? '.attivo' : ''), { onclick: () => { scheda = v; disegna(); } }, t))),
+        scheda === 'equip' ? listaEquip(() => cerca, (v) => (cerca = v)) : scheda === 'armi' ? [
           h('label.check', h('input', { type: 'checkbox', checked: creaAttacco, onchange: (e) => (creaAttacco = e.target.checked) }), ' Crea anche l\'attacco (Combatti)'),
           CATEGORIE_ARMI.map(([cat, tipo, et]) => h('div', h('h4.sottotitolo', et),
             ARMI.filter((a) => a.cat === cat && a.tipo === tipo).map((a) => h('button.voce-prontuario', { onclick: () => {
@@ -91,7 +116,8 @@ function rigaOggetto(o) {
       h('div.ogg-nome', h('strong', o.nome, o.qta > 1 ? h('span.qta', ' ×' + o.qta) : null, R.etichettaMagico(o.nome, o.magico) ? h('span.badge.oro', R.etichettaMagico(o.nome, o.magico)) : null),
         h('small', [TIPI.find((t) => t[0] === o.tipo)?.[1], o.slot ? nomeSlot(o.slot) : null, fmtKg((o.peso || 0) * (o.qta || 0))].filter(Boolean).join(' · '))),
       o.modello ? h('span.badge3d', '3D') : null,
-      o.slot ? h('button.btn.piccolo' + (o.equip ? '.primario' : ''), { onclick: (e) => { e.stopPropagation(); equipaggia(o); } }, o.equip ? 'Togli' : 'Equipaggia') : null),
+      o.slot ? h('button.btn.piccolo' + (o.equip ? '.primario' : ''), { onclick: (e) => { e.stopPropagation(); equipaggia(o); } }, o.equip ? 'Togli' : 'Equipaggia')
+        : usabile(o) ? h('button.btn.piccolo.verde', { disabled: !(o.qta > 0), onclick: (e) => { e.stopPropagation(); usaOggetto(o); } }, o.qta > 0 ? 'Usa' : 'Finito') : null),
     h('div.ogg-dettagli',
       o.descrizione ? h('p', o.descrizione) : null,
       h('div.riga-btn.compatta',
@@ -100,6 +126,25 @@ function rigaOggetto(o) {
         o.equip && o.modello && R.SLOT.some((s) => s.id === o.slot) ? h('button.btn.piccolo', { onclick: () => import('./modelli.js').then((m) => m.apriRegolazione(o.id)) }, '⚙ Regola posizione') : null,
         h('button.btn.piccolo', { onclick: () => apriOggetto(o) }, '✎ Modifica'))));
   return el;
+}
+
+// Consumabili (pozioni, fiale, razioni…): "Usa" ne toglie uno; se l'oggetto cura (campo cura, es. 2d4+2) tira i dadi e
+// recupera i PF. Le pozioni si possono anche far bere a un compagno: in quel caso si dà la cura dal tavolo di gioco.
+const usabile = (o) => o.tipo === 'consumabile' || !!o.cura;
+async function usaOggetto(o) {
+  if (!(o.qta > 0)) return;
+  let cura = 0;
+  if (o.cura) {
+    const r = tira(o.cura, `${o.nome}: cura`);
+    if (!r) return avviso(`Dadi della cura non validi: ${o.cura}`, 'errore');
+    cura = Math.max(0, r.totale);
+  }
+  modifica((x) => {
+    const y = x.inventario.find((z) => z.id === o.id); if (!y) return;
+    y.qta = Math.max(0, (y.qta || 0) - 1);
+    if (cura) applicaPF(x, cura);
+  });
+  setTimeout(() => avviso(cura ? `${o.nome}: +${cura} PF (ne restano ${pg().inventario.find((z) => z.id === o.id)?.qta ?? 0})` : `Usato: ${o.nome} (ne restano ${pg().inventario.find((z) => z.id === o.id)?.qta ?? 0})`), cura ? 1100 : 0);
 }
 
 export function equipaggia(o, forza) {
@@ -159,6 +204,9 @@ export function apriOggetto(o, slotIniziale = '') {
           h('p.nota', ogg.tipo === 'arma'
             ? 'Si somma da solo al tiro per colpire e ai danni degli attacchi fatti con quest\'arma (Combatti).'
             : 'Si somma da solo alla CA quando l\'oggetto è equipaggiato.')) : null,
+        ogg.tipo === 'consumabile' ? h('div',
+          campo('Cura quando lo usi (dadi, facoltativo)', inputTesto(ogg.cura || '', (v) => (ogg.cura = v.trim().replace(/\s+/g, '') || undefined), { placeholder: 'es. 2d4+2' })),
+          h('p.nota', 'Con "Usa" nello zaino ne togli uno e, se qui ci sono dei dadi, recuperi quei PF.')) : null,
         campo(ogg.tipo === 'scudo' ? 'Bonus alla CA dello scudo (di solito 2)' : 'Altro bonus alla CA (anelli, mantelli…)', inputNum(ogg.bonusCA, set('bonusCA'))));
     };
     const disegnaModello = async () => {
@@ -178,7 +226,7 @@ export function apriOggetto(o, slotIniziale = '') {
         } }, ogg.modello ? 'Sostituisci file' : '📂 Collega file .glb'),
         !bone && ogg.modello ? h('p.nota', 'Scegli uno slot visibile (testa, collo, schiena, mani, cintura) per vedere l\'oggetto sul personaggio.') : null);
     };
-    const slotSel = selezione(R.SLOT_OGGETTO, ogg.slot, (v) => { ogg.slot = v; if (v === 'scudo' && !ogg.bonusCA) ogg.bonusCA = 2; disegnaExtra(); disegnaModello(); });
+    const slotSel = selezione(R.SLOT_OGGETTO, ogg.slot, (v) => { ogg.slot = v; if (v === 'manoSx' && ogg.tipo === 'scudo' && !ogg.bonusCA) ogg.bonusCA = 2; disegnaExtra(); disegnaModello(); });
     const nomeInp = inputTesto(ogg.nome, set('nome'), { placeholder: 'Es. Spada lunga' });
     const pesoInp = inputNum(ogg.peso, set('peso'), { step: 0.1, inputmode: 'decimal' });
     const descrInp = areaTesto(ogg.descrizione, set('descrizione'));

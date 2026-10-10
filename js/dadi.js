@@ -47,10 +47,12 @@ function descriviParti(r) {
 }
 
 // Tira e mostra il risultato con animazione
+// opz.ambito: 'attacco' | 'ts' | 'prova' | 'danni' (decide il messaggio del 20 e dell'1 naturale)
 export function tira(expr, etichetta = '', opz = {}) {
   const r = esegui(expr, opz);
   if (!r) return null;
   r.etichetta = etichetta;
+  if (opz.ambito) r.ambito = opz.ambito;
   if (stato.pg) {
     stato.pg.storicoDadi = [r, ...(stato.pg.storicoDadi || [])].slice(0, 60);
     salvaPresto();
@@ -80,7 +82,9 @@ function mostraRisultato(r) {
     h('div.ris-etichetta', r.etichetta || r.expr),
     h('div.ris-dettaglio', descriviParti(r)),
     r.modo !== 'normale' ? h('div.ris-modo', r.modo === 'vantaggio' ? 'Vantaggio' : 'Svantaggio') : null,
-    crit ? h('div.ris-crit', crit === 'critico' ? '20 naturale! Colpo critico' : '1 naturale… fallimento') : null);
+    // Regole 2024: il 20 naturale è un colpo critico e l'1 naturale manca sempre solo nei tiri per colpire
+    crit ? h('div.ris-crit', r.ambito === 'attacco' ? (crit === 'critico' ? '20 naturale! Colpo critico' : '1 naturale: mancato')
+      : crit === 'critico' ? '20 naturale!' : '1 naturale') : null);
   box.addEventListener('click', () => box.remove());
   document.body.append(box);
   vibra(25);
@@ -93,20 +97,25 @@ function mostraRisultato(r) {
   setTimeout(() => box.isConnected && box.remove(), 4700);
 }
 
+// Il modo scelto resta finché non lo cambi: il pulsante dei dadi mostra V o S per ricordarlo
+const segnaModo = () => { document.body.dataset.modoTiro = modo.tiro; };
 export function selettoreModo(onCambia) {
   const opz = [['svantaggio', 'Svant.'], ['normale', 'Normale'], ['vantaggio', 'Vant.']];
   const el = h('div.segmenti');
   const disegna = () => {
     el.replaceChildren(...opz.map(([v, t]) => h('button' + (modo.tiro === v ? '.attivo' : ''), {
-      onclick: () => { modo.tiro = v; disegna(); onCambia?.(v); document.dispatchEvent(new Event('modo-tiro')); },
+      onclick: () => { modo.tiro = v; segnaModo(); disegna(); onCambia?.(v); document.dispatchEvent(new Event('modo-tiro')); },
     }, t)));
   };
-  document.addEventListener('modo-tiro', disegna);
+  // La scheda si ridisegna a ogni modifica: i selettori vecchi (non più nella pagina) smettono di ascoltare
+  const suModo = () => { if (!el.isConnected) document.removeEventListener('modo-tiro', suModo); else disegna(); };
+  document.addEventListener('modo-tiro', suModo);
   disegna();
   return el;
 }
 
 export function apriTiraDadi() {
+  let onTiro = null;
   pannello('Tira-dadi', (c) => {
     let n = 1, bonus = 0;
     const nEl = h('span.cont-val', '1'), bEl = h('span.cont-val', '+0');
@@ -118,7 +127,7 @@ export function apriTiraDadi() {
         h('div', h('strong', r.etichetta || r.expr), h('small', descriviParti(r))),
         h('div.storico-tot', r.totale))) : [h('p.vuoto', 'Nessun tiro ancora.')]));
     };
-    const onTiro = () => disegnaStorico();
+    onTiro = () => disegnaStorico();
     document.addEventListener('tiro', onTiro);
     const tiraDado = (f) => {
       const e = `${n}d${f}${bonus ? (bonus > 0 ? '+' : '') + bonus : ''}`;
@@ -141,5 +150,5 @@ export function apriTiraDadi() {
       h('h3.sez', 'Cronologia', h('button.btn-link', { onclick: () => { if (stato.pg) { stato.pg.storicoDadi = []; salvaPresto(); disegnaStorico(); } } }, 'Svuota')),
       storico);
     disegnaStorico();
-  }, { onChiudi: () => {} });
+  }, { onChiudi: () => document.removeEventListener('tiro', onTiro) });
 }

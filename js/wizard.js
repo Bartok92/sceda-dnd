@@ -4,14 +4,43 @@ import { personaggioVuoto } from './stato.js';
 import { nuovoId } from './db.js';
 import * as R from './regole.js';
 import { esegui } from './dadi.js';
-import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE, COSTO_PUNTI, PUNTI_DISPONIBILI } from './dati2024.js';
-import { oggettoDaArma } from './zaino.js';
+import { SPECIE, BACKGROUND, TALENTI_ORIGINE, COMPETENZE_CLASSE, COSTO_PUNTI, PUNTI_DISPONIBILI, ARMATURE, COLPO_SENZ_ARMI, SERIE_PER_CLASSE } from './dati2024.js';
+import { EQUIP_INIZIALE, ORO_INIZIALE, equipDaId } from './equipaggiamento2024.js';
+import { oggettoDaArma, oggettoDaArmatura, oggettoDaEquip } from './zaino.js';
 import { sigillo } from './icone.js';
 import { selettoreSottoclasse } from './scheda.js';
 
-// Arma di partenza suggerita per classe (se la Destrezza è più alta, per Guerriero e Ladro un'arma a distanza/accurata)
-const ARMA_PARTENZA = { Barbaro: 'ascia-bipenne', Bardo: 'pugnale', Chierico: 'mazza', Druido: 'falcetto', Guerriero: 'spada-lunga', Ladro: 'spada-corta',
-  Mago: 'pugnale', Monaco: 'lancia', Paladino: 'spada-lunga', Ranger: 'arco-lungo', Stregone: 'pugnale', Warlock: 'pugnale' };
+// Equipaggiamento iniziale della classe (manuale 2024, opzione A; il Guerriero ha A e B): armature e scudo indossati,
+// la prima arma impugnata, un attacco collegato per ogni arma, dotazione e monete d'oro. 'oro' = solo monete (opzione B).
+function applicaEquipIniziale(pg, scelta) {
+  const pac = scelta === 'oro' ? null : (EQUIP_INIZIALE[pg.classe] || [])[scelta] || null;
+  if (!pac) {
+    pg.monete.mo = (Number(pg.monete.mo) || 0) + (ORO_INIZIALE[pg.classe] || 0);
+    pg.attacchi.push({ id: nuovoId(), ...R.attaccoDaArma(pg, COLPO_SENZ_ARMI) });
+    return;
+  }
+  for (const id of pac.armature || []) {
+    const a = ARMATURE.find((x) => x.id === id); if (!a) continue;
+    const o = oggettoDaArmatura(a); o.equip = true; pg.inventario.push(o);
+  }
+  let impugnata = false;
+  for (const [id, n] of pac.armi || []) {
+    const a = R.armaDaId(id); if (!a) continue;
+    const o = oggettoDaArma(a); o.qta = n;
+    if (!impugnata) { o.equip = true; impugnata = true; }
+    pg.inventario.push(o);
+    pg.attacchi.push({ id: nuovoId(), ...R.attaccoDaArma(pg, a), oggetto: o.id });
+  }
+  for (const [id, n] of pac.oggetti || []) { const e = equipDaId(id); if (e) pg.inventario.push(oggettoDaEquip(e, (e.qta || 1) * n)); }
+  pg.monete.mo = (Number(pg.monete.mo) || 0) + (pac.mo || 0);
+}
+// Testo breve del pacchetto: "Cotta di maglia, Scudo, Spada lunga, 6 Giavellotti… e 9 mo"
+function testoPacchetto(pac) {
+  const nomi = [...(pac.armature || []).map((id) => ARMATURE.find((x) => x.id === id)?.nome),
+    ...(pac.armi || []).map(([id, n]) => (n > 1 ? n + ' × ' : '') + R.armaDaId(id)?.nome),
+    ...(pac.oggetti || []).map(([id, n]) => (n > 1 ? n + ' × ' : '') + equipDaId(id)?.nome)].filter(Boolean);
+  return `${nomi.join(', ')} e ${pac.mo} mo.`;
+}
 
 export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   const pg = personaggioVuoto();
@@ -19,6 +48,7 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   let passo = 0;
   let aumenti = null; // { FOR: 2, COS: 1 } dal background
   let aPunti = false;  // acquisto a punti attivo (27 punti)
+  let equipScelta = 0; // pacchetto di equipaggiamento iniziale (indice) oppure 'oro'
   const PASSI = ['Chi sei', 'Classe', 'Caratteristiche', 'Abilità', 'Riepilogo'];
   const bg = () => BACKGROUND.find((b) => b.nome === pg.background) || null;
   const totale = (id) => Math.min(20, pg.car[id] + (aumenti?.[id] || 0));
@@ -84,14 +114,10 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
     pg.pe = R.SOGLIE_PE[pg.livello - 1];
     // Risorse di classe e di specie secondo il manuale
     R.applicaRisorse(pg, R.confrontaRisorse(pg));
-    // Arma di partenza: oggetto nello zaino + attacco già compilato + maestria (se la classe la ha)
-    let idArma = ARMA_PARTENZA[pg.classe] || 'pugnale';
-    if (R.mod(pg.car.DES) > R.mod(pg.car.FOR)) { if (pg.classe === 'Guerriero') idArma = 'arco-lungo'; if (pg.classe === 'Paladino') idArma = 'stocco'; }
-    const arma = R.armaDaId(idArma);
-    const ogg = oggettoDaArma(arma); ogg.equip = true;
-    pg.inventario.push(ogg);
-    pg.attacchi.push({ id: 'arma1', ...R.attaccoDaArma(pg, arma), oggetto: ogg.id });
-    if (R.maestrieMax(pg) > 0) pg.maestrie = [arma.id];
+    // Equipaggiamento iniziale del manuale: armatura, armi con i loro attacchi, dotazione e monete; maestrie sulle armi ricevute
+    applicaEquipIniziale(pg, equipScelta);
+    const maxM = R.maestrieMax(pg);
+    if (maxM > 0) pg.maestrie = [...new Set(pg.attacchi.map((a) => a.arma).filter((id) => R.armaDaId(id)?.maestria))].slice(0, maxM);
     pg._talentiControllati = true; pg._maestrieControllate = true;
     onFine(pg);
   }
@@ -118,12 +144,28 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   function passoClasse(c) {
     c.append(
       h('div.classi-griglia', Object.entries(R.CLASSI).map(([nome, cl]) => h('button.classe-card' + (pg.classe === nome ? '.attivo' : ''), {
-        onclick: () => { pg.classe = nome; pg.abilita = {}; applicaClasse(); disegna(); },
+        onclick: () => { pg.classe = nome; pg.abilita = {}; equipScelta = 0; applicaClasse(); disegna(); },
       }, sigillo(nome, 'sigillo'), h('strong', nome), h('small', `d${cl.dv} · TS ${cl.ts.join(', ')}`), cl.magia !== 'nessuna' ? h('small.magico', '✦ incantatore') : null))),
       COMPETENZE_CLASSE[pg.classe] ? h('p.nota', COMPETENZE_CLASSE[pg.classe].testo) : null,
       h('div.griglia2',
         campo('Livello di partenza', contatore(pg.livello, (v) => (pg.livello = v), { min: 1, max: 20 })),
-        campo('Sottoclasse (dal 3° livello)', selettoreSottoclasse(pg.classe, pg.sottoclasse, (v) => (pg.sottoclasse = v)))));
+        campo('Sottoclasse (dal 3° livello)', selettoreSottoclasse(pg.classe, pg.sottoclasse, (v) => (pg.sottoclasse = v)))),
+      sceltaEquip());
+  }
+
+  // Equipaggiamento iniziale: i pacchetti del manuale per la classe, oppure solo monete d'oro
+  function sceltaEquip() {
+    const pacchetti = EQUIP_INIZIALE[pg.classe] || [];
+    const box = h('div.box-info');
+    const disegnaBox = () => {
+      const pac = equipScelta === 'oro' ? null : pacchetti[equipScelta];
+      box.replaceChildren(h('strong', pac ? 'Ricevi:' : `Ricevi ${ORO_INIZIALE[pg.classe] || 0} mo da spendere`),
+        h('small', pac ? testoPacchetto(pac) : 'Compri tu armi, armatura ed equipaggiamento dallo Zaino → Dal manuale.'),
+        pac?.nota ? h('small', ' ' + pac.nota) : null);
+    };
+    disegnaBox();
+    const opz = [...pacchetti.map((p, i) => [i, pacchetti.length > 1 ? `Pacchetto ${p.nome}` : 'Pacchetto del manuale']), ['oro', `Solo oro (${ORO_INIZIALE[pg.classe] || 0} mo)`]];
+    return h('div', campo('Equipaggiamento iniziale', selezione(opz, equipScelta, (v) => { equipScelta = v === 'oro' ? 'oro' : Number(v); disegnaBox(); })), box);
   }
 
   function passoCar(c) {
@@ -148,9 +190,13 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
     disegnaCar();
     const assegna = (valori) => {
       aPunti = false;
-      // Assegna i valori migliori alle caratteristiche più utili per la classe
+      // Valori più alti nelle caratteristiche più importanti per la classe, nell'ordine della tabella
+      // "Serie standard per classe" del manuale (con la serie standard si ottiene proprio la tabella)
+      const serie = SERIE_PER_CLASSE[pg.classe];
       const cl = R.CLASSI[pg.classe];
-      const priorita = [...new Set([cl.carMagia, ...cl.ts, 'COS', 'DES', 'FOR', 'SAG', 'INT', 'CAR'].filter(Boolean))];
+      const priorita = serie
+        ? R.CARATTERISTICHE.map((c, i) => [c.id, serie[i]]).sort((a, b) => b[1] - a[1]).map(([id]) => id)
+        : [...new Set([cl.carMagia, ...cl.ts, 'COS', 'DES', 'FOR', 'SAG', 'INT', 'CAR'].filter(Boolean))];
       const ord = [...valori].sort((a, b) => b - a);
       priorita.forEach((id, i) => (pg.car[id] = ord[i]));
       disegnaCar();
@@ -195,7 +241,8 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
   }
 
   function passoRiepilogo(c) {
-    const tmp = { ...pg, car: Object.fromEntries(R.CARATTERISTICHE.map((cr) => [cr.id, totale(cr.id)])), talenti: bg() && R.TALENTI_AUTOMATICI.includes(bg().talento) ? [bg().talento] : [] };
+    const tmp = { ...structuredClone(pg), car: Object.fromEntries(R.CARATTERISTICHE.map((cr) => [cr.id, totale(cr.id)])), talenti: bg() && R.TALENTI_AUTOMATICI.includes(bg().talento) ? [bg().talento] : [] };
+    applicaEquipIniziale(tmp, equipScelta);   // anteprima: CA e attacchi con l'equipaggiamento scelto
     const pf = R.pfMediTotali(tmp);
     const s = SPECIE[pg.razza]; const b = bg();
     c.append(h('div.card.riepilogo',
@@ -208,8 +255,9 @@ export function avviaCreazione(contenitore, { onFine, onAnnulla }) {
         h('div', h('small', 'Velocità'), h('strong', String(s?.vel ?? 9).replace('.', ',') + ' m')),
         h('div', h('small', 'Iniziativa'), h('strong', R.segno(R.iniziativa(tmp))))),
       h('div.riep-car', R.CARATTERISTICHE.map((cr) => h('span', `${cr.id} ${tmp.car[cr.id]} (${R.segno(R.mod(tmp.car[cr.id]))})`))),
-      b ? h('p.nota', `Talento delle origini: ${TALENTI_ORIGINE[b.talento].nome}. Arma iniziale: ${R.armaDaId(ARMA_PARTENZA[pg.classe])?.nome || 'Pugnale'} (con il suo attacco).`) : null),
-      h('p.nota', 'Tratti della specie, talento, competenze, risorse di classe e un\'arma con il suo attacco vengono aggiunti da soli. Tutto resta modificabile dalla scheda.'));
+      tmp.attacchi.length ? h('p.nota', 'Attacchi: ' + tmp.attacchi.map((a) => `${a.nome} ${R.segno(R.attaccoBonus(tmp, a))} (${R.attaccoDanni(tmp, a)})`).join(' · ')) : null,
+      b ? h('p.nota', `Talento delle origini: ${TALENTI_ORIGINE[b.talento].nome}.`) : null),
+      h('p.nota', 'Tratti della specie, talento, competenze, risorse di classe ed equipaggiamento iniziale (con gli attacchi delle armi) vengono aggiunti da soli. Tutto resta modificabile dalla scheda.'));
   }
 
   disegna();

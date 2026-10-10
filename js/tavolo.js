@@ -23,6 +23,7 @@ import { ico, sigillo } from './icone.js';
 import { applicaPF, avvisaMorte, riposoBreve, riposoLungo } from './scheda.js';
 import { tira } from './dadi.js';
 import * as E from './effetti.js';
+import { equipDaNome } from './equipaggiamento2024.js';
 
 const PREFISSO = 'schedadnd-tavolo-';
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -120,6 +121,12 @@ function uniscMembri(tv, membri) {
   for (const [id, m] of Object.entries(membri || {})) if (m && (!tv.membri[id] || (m.t || 0) > (tv.membri[id].t || 0))) tv.membri[id] = m;
 }
 
+// Versione dell'app (la scrive main.js sulla pagina: così niente import circolari)
+export const versioneApp = () => document.documentElement.dataset.versioneApp || '';
+// "1.13.0" < "1.14.0"? Confronto numero per numero
+export const versionePiuVecchia = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); return false; };
+
 // Quello che si mostra ai compagni (e al Master)
 function istantanea(pg) {
   return {
@@ -128,6 +135,7 @@ function istantanea(pg) {
     condizioni: [...(pg.condizioni || [])], sfinimento: Number(pg.sfinimento) || 0, tsMorte: { ...(pg.tsMorte || { succ: 0, fall: 0 }) },
     percezione: R.percezionePassiva(pg), iniziativa: R.iniziativa(pg), velocita: R.velocitaEffettiva(pg).valore,
     effetti: (pg.effetti || []).map((e) => e.nome), concentrazione: pg.concentrazione?.nome || null,
+    app: versioneApp(),   // versione dell'app di questo telefono (il Master vede chi deve aggiornare)
     t: Date.now(),
   };
 }
@@ -1005,8 +1013,12 @@ function applicaAzione(m) {
     else if (az.tipo === 'oggetto' && az.oggetto?.nome) {
       const o = az.oggetto;
       idOggetto = nuovoId();
-      x.inventario.push({ id: idOggetto, nome: String(o.nome), qta: Math.max(1, Number(o.qta) || 1), peso: Math.max(0, Number(o.peso) || 0), descrizione: String(o.descrizione || ''),
-        tipo: 'oggetto', slot: '', equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, versioneModello: '' });
+      // Se è un oggetto del manuale (es. Pozione di guarigione) prende da lì tipo, cura, peso e descrizione mancanti
+      const man = equipDaNome(o.nome);
+      x.inventario.push({ id: idOggetto, nome: String(o.nome), qta: Math.max(1, Number(o.qta) || 1),
+        peso: Math.max(0, Number(o.peso) || 0) || (man && !man.pesoTot ? man.peso : 0), descrizione: String(o.descrizione || man?.descr || ''),
+        tipo: man?.cat === 'consumabili' ? 'consumabile' : 'oggetto', ...(man?.usa?.cura ? { cura: man.usa.cura } : {}),
+        slot: '', equip: false, modello: null, regolazioni: {}, armatura: null, bonusCA: 0, magico: 0, versioneModello: '' });
     }
     else if (az.tipo === 'effetto' && az.effetto?.nome) E.aggiungiEffetto(x, az.effetto);
     else if (az.tipo === 'fineEffetto') E.togliEffetto(x, az.effettoId);

@@ -126,6 +126,18 @@ function aggiorna2024(pg) {
     }
     pg._magico113 = true;
   }
+  // Versione 1.14.0: stessa conversione anche quando nell'attacco, oltre al +N dell'arma, c'erano altri bonus scritti a mano
+  // (es. Ascia bipenne +1 con colpire +1 e danni +2 → arma +1, danni "altro" +1). I totali restano identici.
+  if (!pg._magico114) {
+    for (const o of pg.inventario.filter((x) => x.tipo === 'arma' && !Number(x.magico))) {
+      const n = Number((String(o.nome).match(/\+([1-3])\b/) || [])[1]);
+      const legati = pg.attacchi.filter((a) => a.oggetto === o.id);
+      if (!n || !legati.length || !legati.every((a) => Number(a.bonus) >= n && Number(a.bonusDanni) >= n)) continue;
+      o.magico = n;
+      legati.forEach((a) => { a.bonus = Number(a.bonus) - n; a.bonusDanni = Number(a.bonusDanni) - n; });
+    }
+    pg._magico114 = true;
+  }
   // Incantesimi presi dal vecchio prontuario (regole 2014) e mai modificati: passano alle regole 2024
   pg.incantesimi.forEach((inc) => {
     if (DESCRIZIONI_2014[inc.nome] == null || inc.descrizione !== DESCRIZIONI_2014[inc.nome]) return;

@@ -121,12 +121,20 @@ export function livelloDaPE(pe) {
 export const livelliMulticlasse = (pg) => (pg.multiclasse || []).reduce((s, c) => s + (Number(c.livello) || 0), 0);
 export const livelloClasseIniziale = (pg) => Math.max(1, (pg.livello || 1) - livelliMulticlasse(pg));
 
+// Sottoclassi che danno incantesimi "a un terzo" (regole 2024): Cavaliere mistico (Guerriero) e Mistificatore arcano (Ladro),
+// dal 3° livello, con l'Intelligenza. Riconosciute dal nome scritto, in italiano o in inglese.
+const normSotto = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]+/g, ' ').trim();
+const SOTTO_TERZO = { Guerriero: ['cavaliere mistico', 'eldritch knight'], Ladro: ['mistificatore arcano', 'arcane trickster'] };
+export const incantatoreTerzo = (classe, sottoclasse, livello) => livello >= 3 && (SOTTO_TERZO[classe] || []).some((x) => normSotto(sottoclasse).includes(x));
+const magiaDi = (tipo, classe, sottoclasse, livello) => (tipo === 'nessuna' && incantatoreTerzo(classe, sottoclasse, livello) ? 'terzo' : tipo);
+
 // Tutte le classi del personaggio: la prima è quella iniziale (i = null), poi le altre (i = indice in multiclasse)
 export function elencoClassi(pg) {
+  const liv0 = livelloClasseIniziale(pg);
   return [
-    { i: null, classe: pg.classe, sottoclasse: pg.sottoclasse, livello: livelloClasseIniziale(pg), dv: pg.dadiVita.tipo, rimasti: pg.dadiVita.rimasti, magia: pg.magia?.tipo || 'nessuna' },
+    { i: null, classe: pg.classe, sottoclasse: pg.sottoclasse, livello: liv0, dv: pg.dadiVita.tipo, rimasti: pg.dadiVita.rimasti, magia: magiaDi(pg.magia?.tipo || 'nessuna', pg.classe, pg.sottoclasse, liv0) },
     ...(pg.multiclasse || []).map((c, i) => ({ i, classe: c.classe, sottoclasse: c.sottoclasse, livello: Number(c.livello) || 1,
-      dv: CLASSI[c.classe]?.dv || 8, rimasti: c.dvRimasti ?? c.livello, magia: CLASSI[c.classe]?.magia || 'nessuna' })),
+      dv: CLASSI[c.classe]?.dv || 8, rimasti: c.dvRimasti ?? c.livello, magia: magiaDi(CLASSI[c.classe]?.magia || 'nessuna', c.classe, c.sottoclasse, Number(c.livello) || 1) })),
   ];
 }
 // "Ladro 5 (Assassino) / Guerriero 2" — con una sola classe resta "Paladino (Oathbreaker)"
@@ -147,17 +155,18 @@ export function slotMassimi(pg) {
   const m = pg.magia || {};
   if (Array.isArray(m.slotManuali)) return m.slotManuali.map((n) => Number(n) || 0);
   const base = new Array(9).fill(0);
-  const incantatori = elencoClassi(pg).filter((c) => c.magia === 'piena' || c.magia === 'mezza');
+  const incantatori = elencoClassi(pg).filter((c) => c.magia === 'piena' || c.magia === 'mezza' || c.magia === 'terzo');
   let riga = null;
   if (incantatori.length === 1) {
     const { magia, livello: liv } = incantatori[0];
     if (magia === 'piena') riga = SLOT_PIENI[liv - 1];
-    else riga = SLOT_PIENI[Math.ceil(liv / 2) - 1]; // regole 2024: Paladino e Ranger hanno slot già dal 1° livello
+    else if (magia === 'mezza') riga = SLOT_PIENI[Math.ceil(liv / 2) - 1]; // regole 2024: Paladino e Ranger hanno slot già dal 1° livello
+    else if (liv >= 3) riga = SLOT_PIENI[Math.ceil(liv / 3) - 1];       // Cavaliere mistico e Mistificatore arcano (tabelle 2024)
   } else if (incantatori.length > 1) {
-    // Multiclasse (regole 2024): livelli pieni + metà dei livelli da Paladino/Ranger arrotondata per eccesso
-    const pieni = incantatori.filter((c) => c.magia === 'piena').reduce((s, c) => s + c.livello, 0);
-    const mezzi = incantatori.filter((c) => c.magia === 'mezza').reduce((s, c) => s + c.livello, 0);
-    const liv = Math.min(20, pieni + Math.ceil(mezzi / 2));
+    // Multiclasse (regole 2024): livelli pieni + metà dei livelli da Paladino/Ranger (per eccesso)
+    // + un terzo dei livelli da Guerriero/Ladro con Cavaliere mistico o Mistificatore arcano (per difetto)
+    const somma = (tipo) => incantatori.filter((c) => c.magia === tipo).reduce((s, c) => s + c.livello, 0);
+    const liv = Math.min(20, somma('piena') + Math.ceil(somma('mezza') / 2) + Math.floor(somma('terzo') / 3));
     if (liv > 0) riga = SLOT_PIENI[liv - 1];
   }
   if (riga) riga.forEach((n, i) => (base[i] = n));
@@ -204,9 +213,14 @@ export function bonusAbilita(pg, ab, { passiva = false } = {}) {
 // Tuttofare (Bardo dal 2° livello): metà del bonus di competenza (per difetto) alle prove di abilità senza competenza
 export const bonusTuttofare = (pg, liv = 0) => (!liv && automatico(pg, 'tuttofare') ? Math.floor(competenza(pg.livello) / 2) : 0);
 export const bonusProva = (pg, car) => mod(pg.car[car]) + malusSfinimento(pg);
+// Competenza in un tiro salvezza: quella segnata nella scheda, più i privilegi che la danno da soli (regole 2024):
+// Sopravvissuto disciplinato (Monaco 14°, tutti i TS) e Mente sfuggente (Ladro 15°, Saggezza e Carisma)
+export const tsDaPrivilegio = (pg, car) => automatico(pg, 'sopravvissuto-disciplinato') ? 'Sopravvissuto disciplinato'
+  : automatico(pg, 'mente-sfuggente') && (car === 'SAG' || car === 'CAR') ? 'Mente sfuggente' : null;
+export const tsCompetente = (pg, car) => !!(pg.tsComp?.includes(car) || tsDaPrivilegio(pg, car));
 export function bonusTS(pg, car) {
   // bonusTiriSalvezza: bonus a tutti i TS sempre attivo; gli effetti (es. Aura di protezione ricevuta) si aggiungono
-  return mod(pg.car[car]) + (pg.tsComp?.includes(car) ? competenza(pg.livello) : 0) + (Number(pg.bonusTiriSalvezza) || 0) + sommaEffetti(pg, 'ts') + auraProtezione(pg) + malusSfinimento(pg);
+  return mod(pg.car[car]) + (tsCompetente(pg, car) ? competenza(pg.livello) : 0) + (Number(pg.bonusTiriSalvezza) || 0) + sommaEffetti(pg, 'ts') + auraProtezione(pg) + malusSfinimento(pg);
 }
 // Aura di protezione (Paladino dal 6° livello): vale anche per il paladino stesso, bonus = CAR (minimo +1).
 // Non funziona se il paladino è Incapacitato (anche Paralizzato, Pietrificato, Privo di sensi, Stordito).
@@ -220,12 +234,15 @@ export function iniziativa(pg) {
   return mod(pg.car.DES) + (Number(pg.iniziativaBonus) || 0) + (haTalento(pg, 'allerta') ? competenza(pg.livello) : 0) + malusSfinimento(pg);
 }
 
+// Caratteristica da incantatore: quella scelta nella scheda; se manca e il personaggio è Cavaliere mistico o
+// Mistificatore arcano, l'Intelligenza (regole 2024)
+export const carIncantatore = (pg) => pg.magia?.car || (elencoClassi(pg).some((c) => c.magia === 'terzo') ? 'INT' : null);
 export function cdIncantesimi(pg) {
-  const c = pg.magia?.car; if (!c) return null;
+  const c = carIncantatore(pg); if (!c) return null;
   return 8 + competenza(pg.livello) + mod(pg.car[c]);
 }
 export function attaccoIncantesimi(pg) {
-  const c = pg.magia?.car; if (!c) return null;
+  const c = carIncantatore(pg); if (!c) return null;
   return competenza(pg.livello) + mod(pg.car[c]) + malusSfinimento(pg);
 }
 
@@ -261,9 +278,14 @@ export function classeArmatura(pg) {
     const candidati = [10 + des];
     if (classi.includes('Barbaro')) candidati.push(10 + des + mod(pg.car.COS));
     if (classi.includes('Monaco') && !scudoImbracciato(pg)) candidati.push(10 + des + mod(pg.car.SAG));
+    // Resilienza draconica (scudo permesso) e Passo abbagliante del Collegio della Danza (senza scudo): 10 + DES + CAR
+    if (automatico(pg, 'resilienza-draconica')) candidati.push(10 + des + mod(pg.car.CAR));
+    if (automatico(pg, 'passo-abbagliante') && !scudoImbracciato(pg)) candidati.push(10 + des + mod(pg.car.CAR));
     if (effettiAttivi(pg).some((e) => e.mod?.armaturaMagica)) candidati.push(13 + des);   // Armatura magica
     val = Math.max(...candidati);
   }
+  // Stile di combattimento Difesa: +1 alla CA mentre indossi un'armatura (leggera, media o pesante)
+  if (arm && automatico(pg, 'stile-difesa')) val += 1;
   // Scudo senza addestramento: per le regole 2024 non dà il bonus alla CA
   const scudoInutile = scudoImbracciato(pg) && automatico(pg, 'scudo-addestramento') && !competenzeEquip(pg).armature.has('scudo');
   // bonusCA: scudi (+2), anelli, mantelli…; magico: +1/+2/+3 di armature e scudi magici (vedi bonusMagicoCA)
@@ -363,6 +385,10 @@ export const capacitaCarico = (pg) => (Number(pg.car.FOR) || 0) * 7.5 * (automat
 
 // ───── Talenti con effetto automatico (pg.talenti = ['robusto', 'allerta', ...]) ─────
 export const haTalento = (pg, id) => (pg.talenti || []).includes(id);
+// Talento presente in qualunque modo: con effetto automatico o aggiunto dall'elenco del manuale (Note → Talenti)
+export const haTalentoScelto = (pg, id) => haTalento(pg, id) || (pg.talentiScelti || []).some((t) => t.id === id);
+// Sottoclasse del manuale riconosciuta dal nome scritto (italiano o inglese), per le regole automatiche
+const haSottoclasse = (pg, classe, nomi) => elencoClassi(pg).some((c) => c.classe === classe && nomi.some((n) => normSotto(c.sottoclasse).includes(n)));
 export const TALENTI_AUTOMATICI = ['robusto', 'allerta', 'fortunato', 'rissaiolo', 'iniziato-alla-magia'];
 
 // ───── Automatismi delle regole 2024 ─────
@@ -381,6 +407,17 @@ export const AUTOMATISMI = [
   { id: 'intraprendente', nome: 'Intraprendente', fonte: 'Umano', testo: 'Ottieni Ispirazione eroica ogni volta che finisci un riposo lungo.', vale: (pg) => pg.razza === 'Umano' },
   { id: 'scudo-addestramento', nome: 'Scudo senza addestramento', fonte: 'Regole dell\'equipaggiamento', testo: 'Se non sei addestrato agli scudi, lo scudo non aggiunge il suo bonus alla CA.', vale: (pg) => !!scudoImbracciato(pg) && !competenzeEquip(pg).armature.has('scudo') },
   { id: 'concentrazione-incapacitato', nome: 'Concentrazione e Incapacitato', fonte: 'Glossario delle regole', testo: 'Se diventi Incapacitato (anche Paralizzato, Pietrificato, Privo di sensi o Stordito) perdi la concentrazione.', vale: (pg) => !!pg.concentrazione || elencoClassi(pg).some((c) => c.magia && c.magia !== 'nessuna') },
+  { id: 'sopravvissuto-disciplinato', nome: 'Sopravvissuto disciplinato', fonte: 'Monaco 14° livello', testo: 'Competenza in tutti i tiri salvezza.', vale: (pg) => livelloDiClasse(pg, 'Monaco') >= 14 },
+  { id: 'mente-sfuggente', nome: 'Mente sfuggente', fonte: 'Ladro 15° livello', testo: 'Competenza nei tiri salvezza su Saggezza e Carisma.', vale: (pg) => livelloDiClasse(pg, 'Ladro') >= 15 },
+  { id: 'resilienza-draconica', nome: 'Resilienza draconica', fonte: 'Stregoneria Draconica 3° livello', testo: 'Senza armatura la CA base è 10 + DES + CAR. +1 PF massimo per livello da stregone (+3 al 3°): conta quando sali di livello e in "Ricalcola PF".',
+    vale: (pg) => livelloDiClasse(pg, 'Stregone') >= 3 && haSottoclasse(pg, 'Stregone', ['draconic', 'drago']) },
+  { id: 'passo-abbagliante', nome: 'Passo abbagliante', fonte: 'Collegio della Danza 3° livello', testo: 'Senza armatura né scudo la CA base è 10 + DES + CAR.',
+    vale: (pg) => livelloDiClasse(pg, 'Bardo') >= 3 && haSottoclasse(pg, 'Bardo', ['danza', 'dance']) },
+  { id: 'stile-difesa', nome: 'Stile Difesa', fonte: 'Talento Stile di combattimento', testo: '+1 alla CA mentre indossi un\'armatura leggera, media o pesante.', vale: (pg) => haTalentoScelto(pg, 'difesa') },
+  { id: 'stile-tiro', nome: 'Stile Tiro', fonte: 'Talento Stile di combattimento', testo: '+2 ai tiri per colpire con le armi a distanza.', vale: (pg) => haTalentoScelto(pg, 'tiro') },
+  { id: 'stile-duellare', nome: 'Stile Duellare', fonte: 'Talento Stile di combattimento', testo: '+2 ai danni con un\'arma da mischia in una mano (non a due mani), se non hai altre armi equipaggiate.', vale: (pg) => haTalentoScelto(pg, 'duellare') },
+  { id: 'stile-senz-armi', nome: 'Stile Combattere senz\'armi', fonte: 'Talento Stile di combattimento', testo: 'Il colpo senz\'armi fa 1d6 (1d8 se non hai armi né scudo equipaggiati).', vale: (pg) => haTalentoScelto(pg, 'combattere-senz-armi') },
+  { id: 'ira-danni', nome: 'Danni da ira', fonte: 'Barbaro 1° livello', testo: 'Mentre sei in Ira (Combatti → Su di te o sul gruppo) il bonus ai danni si somma da solo agli attacchi con la Forza.', vale: (pg) => livelloDiClasse(pg, 'Barbaro') >= 1 },
 ];
 export const automatico = (pg, id) => {
   const a = AUTOMATISMI.find((x) => x.id === id);
@@ -406,13 +443,21 @@ export function requisitiMulticlasse(pg) {
 }
 // PF massimi extra per livello: talento Robusto (+2) e Robustezza nanica (+1)
 export const pfExtraPerLivello = (pg) => (haTalento(pg, 'robusto') ? 2 : 0) + (pg.razza === 'Nano' ? 1 : 0);
+// Resilienza draconica: +3 PF massimi al 3° livello da stregone e +1 a ogni livello da stregone successivo
+export const pfDraconici = (pg) => (automatico(pg, 'resilienza-draconica') ? livelloDiClasse(pg, 'Stregone') : 0);
+// PF in più guadagnati salendo al livello `nuovo` della classe cl (per la Resilienza draconica)
+export function pfDraconiciSalendo(pg, cl, nuovo) {
+  if (cl.classe !== 'Stregone' || nuovo < 3 || (pg.automatismiOff || []).includes('resilienza-draconica')) return 0;
+  if (!['draconic', 'drago'].some((n) => normSotto(cl.sottoclasse).includes(n))) return 0;
+  return nuovo === 3 ? 3 : 1;
+}
 
 // PF medi con più classi: dado pieno al 1° livello della classe iniziale, poi la media di ogni classe
 export function pfMediTotali(pg) {
   const m = mod(pg.car.COS);
   let pf = pfMediGenerati(pg.classe, livelloClasseIniziale(pg), pg.car.COS);
   (pg.multiclasse || []).forEach((c) => { const dv = CLASSI[c.classe]?.dv || 8; pf += (Number(c.livello) || 0) * Math.max(1, Math.floor(dv / 2) + 1 + m); });
-  return Math.max(1, pf + pfExtraPerLivello(pg) * (pg.livello || 1));
+  return Math.max(1, pf + pfExtraPerLivello(pg) * (pg.livello || 1) + pfDraconici(pg));
 }
 
 export function pfMediGenerati(classe, livello, cos) {
@@ -435,26 +480,60 @@ export function armaDaNome(nome) {
 }
 // Caratteristica di un attacco: 'ACC' = la migliore tra Forza e Destrezza (armi accurate), 'MAG' = da incantatore
 export function carAttacco(pg, att) {
-  if (att.car === 'MAG') return pg.magia?.car || null;
+  if (att.car === 'MAG') return carIncantatore(pg);
   if (att.car === 'ACC') return mod(pg.car.DES) > mod(pg.car.FOR) ? 'DES' : 'FOR';
   return att.car;
 }
 // L'arma dello zaino collegata a un attacco (att.oggetto) e il suo bonus magico (+1, +2, +3), che vale per colpire e per i danni
 export const oggettoDiAttacco = (pg, att) => (att?.oggetto ? (pg.inventario || []).find((o) => o.id === att.oggetto) || null : null);
 export const bonusMagicoAttacco = (pg, att) => Number(oggettoDiAttacco(pg, att)?.magico) || 0;
+// Bonus automatici dei talenti Stile di combattimento (si spengono da ✎ Modifica → Regole automatiche)
+const bonusStileColpire = (pg, att) => (automatico(pg, 'stile-tiro') && armaDi(att)?.tipo === 'distanza' ? 2 : 0);
+const armiEquipaggiate = (pg) => (pg.inventario || []).filter((o) => o.equip && o.tipo === 'arma');
+// Duellare: arma da mischia (non a due mani) impugnata in una mano e nessun'altra arma equipaggiata; non quando la usi a due mani
+function duellareVale(pg, att, dueMani) {
+  const arma = armaDi(att);
+  if (dueMani || !automatico(pg, 'stile-duellare') || !arma || arma.tipo !== 'mischia' || arma.cat === 'senzarmi' || arma.prop.includes('due-mani')) return false;
+  const altre = armiEquipaggiate(pg).filter((o) => o.id !== att.oggetto);
+  return att.oggetto ? altre.length === 0 : altre.length <= 1;
+}
+export const bonusStileDanni = (pg, att, { dueMani = false } = {}) => (duellareVale(pg, att, dueMani) ? 2 : 0);
+// Ira del Barbaro attiva (effetto "Ira"): il bonus ai danni vale per gli attacchi che usano la Forza
+export const bonusIra = (pg, att) => (automatico(pg, 'ira-danni') && carAttacco(pg, att) === 'FOR' ? sommaEffetti(pg, 'danniFor') : 0);
 export function attaccoBonus(pg, att) {
   const c = carAttacco(pg, att);
   let b = c ? mod(pg.car[c]) : 0;
   if (att.comp) b += competenza(pg.livello);
-  return b + (Number(att.bonus) || 0) + bonusMagicoAttacco(pg, att) + sommaEffetti(pg, 'attacco') + malusSfinimento(pg);
+  return b + (Number(att.bonus) || 0) + bonusMagicoAttacco(pg, att) + bonusStileColpire(pg, att) + sommaEffetti(pg, 'attacco') + malusSfinimento(pg);
 }
 // Danni già sommati: "1d12" + FOR 5 + magico 2 → "1d12+7" (se i dadi sono solo un numero, es. colpo senz'armi "1", fa la somma)
-export function attaccoDanni(pg, att, { dadi } = {}) {
+// dueMani: danni dell'arma versatile impugnata a due mani (niente Duellare)
+export function attaccoDanni(pg, att, { dadi, dueMani = false } = {}) {
   const c = carAttacco(pg, att);
-  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0) + bonusMagicoAttacco(pg, att) + sommaEffetti(pg, 'danni');
+  const fisso = (att.modDanni && c ? mod(pg.car[c]) : 0) + (Number(att.bonusDanni) || 0) + bonusMagicoAttacco(pg, att)
+    + bonusStileDanni(pg, att, { dueMani }) + bonusIra(pg, att) + sommaEffetti(pg, 'danni');
   const s = String(dadi || dadoDanniAttacco(pg, att) || '').trim() || '1';
   if (/^\d+$/.test(s)) return String(Math.max(1, Number(s) + fisso));
   return fisso ? s + (fisso > 0 ? '+' : '') + fisso : s;
+}
+// Da dove vengono i numeri di un attacco (per la spiegazione nell'editor dell'attacco)
+export function dettaglioAttacco(pg, att) {
+  const c = carAttacco(pg, att); const out = [];
+  if (c) out.push(`${c} ${segno(mod(pg.car[c]))}`);
+  if (att.comp) out.push(`competenza ${segno(competenza(pg.livello))}`);
+  if (bonusMagicoAttacco(pg, att)) out.push(`arma magica ${segno(bonusMagicoAttacco(pg, att))}`);
+  if (bonusStileColpire(pg, att)) out.push('stile Tiro +2');
+  if (Number(att.bonus)) out.push(`altro ${segno(Number(att.bonus))}`);
+  if (sommaEffetti(pg, 'attacco')) out.push(`effetti ${segno(sommaEffetti(pg, 'attacco'))}`);
+  if (malusSfinimento(pg)) out.push(`sfinimento ${segno(malusSfinimento(pg))}`);
+  const danni = [];
+  if (att.modDanni && c) danni.push(`${c} ${segno(mod(pg.car[c]))}`);
+  if (bonusMagicoAttacco(pg, att)) danni.push(`arma magica ${segno(bonusMagicoAttacco(pg, att))}`);
+  if (bonusStileDanni(pg, att)) danni.push('stile Duellare +2');
+  if (bonusIra(pg, att)) danni.push(`Ira ${segno(bonusIra(pg, att))}`);
+  if (Number(att.bonusDanni)) danni.push(`altro ${segno(Number(att.bonusDanni))}`);
+  if (sommaEffetti(pg, 'danni')) danni.push(`effetti ${segno(sommaEffetti(pg, 'danni'))}`);
+  return { colpire: out.join(', '), danni: danni.join(', ') };
 }
 // Quante maestrie può usare il personaggio (la classe che ne dà di più)
 export const maestrieMax = (pg) => Math.max(0, ...elencoClassi(pg).map((c) => maestrieClasse(c.classe, c.livello)));
@@ -479,7 +558,10 @@ export function dadoAutomatico(pg, arma) {
   const conArti = mon && armaDaMonaco(arma) && automatico(pg, 'arti-marziali');
   if (arma.cat !== 'senzarmi' && !conArti) return null;
   let d = arma.cat === 'senzarmi' ? (haTalento(pg, 'rissaiolo') ? '1d4' : '1') : arma.danni;
-  if (conArti) { const ma = mon >= 17 ? '1d12' : mon >= 11 ? '1d10' : mon >= 5 ? '1d8' : '1d6'; if (mediaDado(ma) > mediaDado(d)) d = ma; }
+  const piuAlto = (x) => { if (mediaDado(x) > mediaDado(d)) d = x; };
+  // Stile Combattere senz'armi: 1d6, oppure 1d8 se non hai armi né scudo equipaggiati
+  if (arma.cat === 'senzarmi' && automatico(pg, 'stile-senz-armi')) piuAlto(armiEquipaggiate(pg).length || scudoImbracciato(pg) ? '1d6' : '1d8');
+  if (conArti) piuAlto(mon >= 17 ? '1d12' : mon >= 11 ? '1d10' : mon >= 5 ? '1d8' : '1d6');
   return d;
 }
 // Il dado dell'attacco segue da solo le regole finché è uno dei dadi "semplici" (1, 1d4…1d12);

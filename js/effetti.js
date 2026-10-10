@@ -18,7 +18,7 @@ import { tira } from './dadi.js';
 
 const tavolo = () => import('./tavolo.js');   // caricato quando serve (evita dipendenze circolari)
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\(.*?\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-const modInc = (pg) => R.mod(pg.car?.[pg.magia?.car] ?? 10);   // modificatore della caratteristica da incantatore
+const modInc = (pg) => R.mod(pg.car?.[R.carIncantatore(pg)] ?? 10);   // modificatore della caratteristica da incantatore
 const piuMod = (pg) => { const m = modInc(pg); return m ? (m > 0 ? '+' : '') + m : ''; };
 const sopra = (liv, base) => Math.max(0, liv - base);
 const nomeCond = (id) => R.CONDIZIONI.find((c) => c.id === id)?.nome || id;
@@ -98,9 +98,9 @@ export const CATALOGO = [
 
 // Trova la voce di catalogo per un incantesimo dell'utente (dal nome, italiano o inglese)
 export function trovaIncantesimo(s) {
-  const n = norm(s?.nome);
-  if (!n) return null;
-  return CATALOGO.find((d) => d.nomi.some((x) => norm(x) === n)) || null;
+  const n = norm(s?.nome), en = norm(s?.en);   // en: nome inglese degli incantesimi presi dal prontuario 2024
+  if (!n && !en) return null;
+  return CATALOGO.find((d) => d.nomi.some((x) => norm(x) === n || (en && norm(x) === en))) || null;
 }
 
 // ───────────────────────── Privilegi di classe per il gruppo ─────────────────────────
@@ -160,6 +160,7 @@ export function sommario(e) {
   if (m.attacco) s.push(`${R.segno(m.attacco)} per colpire`);
   if (m.attaccoDado) s.push(`+${m.attaccoDado} per colpire`);
   if (m.danni) s.push(`${R.segno(m.danni)} danni`);
+  if (m.danniFor) s.push(`${R.segno(m.danniFor)} danni con la Forza`);
   if (m.danniDado) s.push(`+${m.danniDado} danni`);
   if (m.provaDado) s.push(`+${m.provaDado} ${m.soloAbilita ? 'a ' + (R.ABILITA.find((a) => a.id === m.soloAbilita)?.nome || m.soloAbilita) : 'a una prova'}`);
   if (m.pfMax) s.push(`+${m.pfMax} PF massimi`);
@@ -179,7 +180,7 @@ export function tiraCon(expr, etichetta, ambito, opz = {}, { critico = false, ab
   const nomi = p ? R.effettiConDadi(p, ambito, abilita).map((e) => e.nome) : [];
   let e = String(expr) + extra;
   if (critico) e = e.replace(/(\d*)d(\d+)/g, (_, n, f) => `${(Number(n) || 1) * 2}d${f}`);
-  const r = tira(e, etichetta + (nomi.length ? ` (+ ${nomi.join(', ')})` : ''), opz);
+  const r = tira(e, etichetta + (nomi.length ? ` (+ ${nomi.join(', ')})` : ''), { ...opz, ambito });
   const usati = (p?.effetti || []).filter((x) => x.usi === ambito);
   if (r && usati.length) {
     modifica((x) => usati.forEach((u) => togliEffetto(x, u.id)));
@@ -392,9 +393,12 @@ export async function usaPrivilegio(pr) {
   if (pr.id === 'ira') {
     if (!consumaRisorsa(pr.risorsa)) return;
     const danni = bb >= 16 ? 4 : bb >= 9 ? 3 : 2;
-    const e = { id: nuovoId(), nome: 'Ira', da: { id: p.id, nome: p.nome }, conc: false, durata: 'fino a 10 minuti', t: Date.now(), mod: {},
-      nota: `+${danni} ai danni degli attacchi con la Forza; resistenza ai danni contundenti, perforanti e taglienti; vantaggio a prove e TS di Forza; niente incantesimi né concentrazione.` };
+    // danniFor: il bonus si somma da solo agli attacchi con la Forza (regola automatica "Danni da ira", spegnibile)
+    const e = { id: nuovoId(), nome: 'Ira', da: { id: p.id, nome: p.nome }, conc: false, durata: 'fino a 10 minuti', t: Date.now(), mod: { danniFor: danni },
+      nota: `+${danni} ai danni degli attacchi con la Forza (già sommato in Combatti); resistenza ai danni contundenti, perforanti e taglienti; vantaggio a prove e TS di Forza; niente incantesimi né concentrazione.` };
     modifica((x) => aggiungiEffetto(x, e));
+    // In Ira non puoi mantenere la concentrazione (regole 2024)
+    if (p.concentrazione) await finisciConcentrazione({ motivo: 'Ira' });
     avviso('Sei in ira!');
     return;
   }

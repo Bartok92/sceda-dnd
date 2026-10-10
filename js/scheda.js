@@ -5,10 +5,10 @@ import { nuovoId } from './db.js';
 import * as R from './regole.js';
 import { tira, selettoreModo } from './dadi.js';
 import { ico } from './icone.js';
-import { INCANTESIMI_BASE } from './incantesimi-base.js';
+import { INCANTESIMI_2024 } from './incantesimi2024.js';
 import * as E from './effetti.js';
 import { SOTTOCLASSI, TALENTI, CATEGORIE_TALENTI, talentoDaId, sottoclasseDi, gruppiTratti, talentiDelPg, privilegiSottoclasseAlLivello } from './privilegi2024.js';
-import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, trucchettiClasse, privilegiCombattimento, privilegiAlLivello, PRIVILEGI_LIVELLO } from './dati2024.js';
+import { ARMI, COLPO_SENZ_ARMI, CATEGORIE_ARMI, PROPRIETA_ARMI, MAESTRIE, TALENTI_ORIGINE, SFINIMENTO_2024, PREPARATI, PREPARATI_TERZO, trucchettiClasse, trucchettiTerzo, privilegiCombattimento, privilegiAlLivello, PRIVILEGI_LIVELLO } from './dati2024.js';
 
 const pg = () => stato.pg;
 const num = (v, d = 0) => (v === '' || v == null || isNaN(Number(v)) ? d : Number(v));
@@ -68,7 +68,7 @@ function saliDiLivello() {
   pannello(`Livello ${p.livello + 1}!`, (c, chiudi) => {
     // Con il multiclasse si sceglie prima in quale classe salire
     const scegliPF = (cl) => {
-      const dv = cl.dv; const extra = R.pfExtraPerLivello(p); const media = Math.max(1, Math.floor(dv / 2) + 1 + m) + extra;
+      const dv = cl.dv; const extra = R.pfExtraPerLivello(p) + R.pfDraconiciSalendo(p, cl, cl.livello + 1); const media = Math.max(1, Math.floor(dv / 2) + 1 + m) + extra;
       const applica = (pf) => {
         let cambiate = [];
         modifica((x) => {
@@ -85,7 +85,7 @@ function saliDiLivello() {
       const nuovi = [...privilegiAlLivello(cl.classe, cl.livello + 1).filter((n) => n !== 'Privilegio della sottoclasse'),
         ...privilegiSottoclasseAlLivello(cl.classe, cl.sottoclasse, cl.livello + 1).map((n) => `${n} (${sottoclasseDi(cl.classe, cl.sottoclasse).nome})`)];
       if (privilegiAlLivello(cl.classe, cl.livello + 1).includes('Privilegio della sottoclasse') && !sottoclasseDi(cl.classe, cl.sottoclasse)) nuovi.push('Privilegio della sottoclasse (scegli la sottoclasse per vederlo)');
-      c.replaceChildren(h('p', `${cl.classe} ${cl.livello} → ${cl.livello + 1}. Aumenta i punti ferita massimi: dado vita d${dv} ${R.segno(m)} (Costituzione)${extra ? ` ${R.segno(extra)} (talenti/specie)` : ''}.`),
+      c.replaceChildren(h('p', `${cl.classe} ${cl.livello} → ${cl.livello + 1}. Aumenta i punti ferita massimi: dado vita d${dv} ${R.segno(m)} (Costituzione)${extra ? ` ${R.segno(extra)} (talenti, specie o privilegi)` : ''}.`),
         h('div.riga-btn',
           h('button.btn.grande', { onclick: () => applica(media) }, `Usa la media (+${media})`),
           h('button.btn.grande.primario', { onclick: () => { const r = tira(`1d${dv}`, 'Dado vita (livello)'); applica(Math.max(1, r.totale + m) + extra); } }, `Tira 1d${dv}`)),
@@ -423,7 +423,7 @@ function rigaAttacco(a) {
     h('div.att-info', { onclick: () => modificaAttacco(a) }, h('strong', a.nome, R.etichettaMagico(a.nome, R.bonusMagicoAttacco(p, a)) ? h('span.badge.oro', R.etichettaMagico(a.nome, R.bonusMagicoAttacco(p, a))) : null), h('small', dettagli || 'tocca per modificare')),
     h('div.att-extra',
       mast ? h('button.chip-maestria' + (attiva ? '.attiva' : ''), { onclick: () => mostraMaestria(a, arma) }, `⚔ ${mast.nome}`) : null,
-      arma?.versatile ? h('button.chip-mini', { onclick: () => E.tiraCon(R.attaccoDanni(p, a, { dadi: arma.versatile }), `${a.nome}: danni a due mani`, 'danni') }, `a 2 mani ${arma.versatile}`) : null,
+      arma?.versatile ? h('button.chip-mini', { onclick: () => E.tiraCon(R.attaccoDanni(p, a, { dadi: arma.versatile, dueMani: true }), `${a.nome}: danni a due mani`, 'danni') }, `a 2 mani ${arma.versatile}`) : null,
       pesante ? h('span.avviso-mini', '⚠ ' + pesante) : null),
     h('button.btn-tiro', { onclick: () => E.tiraCon('1d20' + fmtMod(bc), `${a.nome}: tiro per colpire`, 'attacco', { d20: true }) }, h('small', 'colpire'), R.segno(bc) + R.dadiEffetti(p, 'attacco')),
     h('button.btn-tiro.danni', {
@@ -491,7 +491,12 @@ function modificaAttacco(a) {
     const disegna = () => {
       const p = pg(); const arma = R.armaDi(att);
       const anteprima = h('p.anteprima');
-      const agg = () => (anteprima.textContent = `Per colpire ${R.segno(R.attaccoBonus(p, att))} · Danni ${R.attaccoDanni(p, att)} ${att.tipo}`);
+      const spiega = h('p.nota');
+      const agg = () => {
+        anteprima.textContent = `Per colpire ${R.segno(R.attaccoBonus(p, att))} · Danni ${R.attaccoDanni(p, att)} ${att.tipo}`;
+        const d = R.dettaglioAttacco(p, att);
+        spiega.textContent = `Colpire: ${d.colpire || 'nessun bonus'}. Danni: ${d.danni || 'solo i dadi'}.`;
+      };
       const set = (k) => (v) => { att[k] = v; agg(); };
       const armiZaino = (p.inventario || []).filter((o) => o.tipo === 'arma');
       c.replaceChildren(
@@ -519,7 +524,7 @@ function modificaAttacco(a) {
           campo('Somma mod. ai danni', selezione([['1', 'Sì'], ['0', 'No (es. trucchetti)']], att.modDanni ? '1' : '0', (v) => set('modDanni')(v === '1'))),
           campo('Gittata', inputTesto(att.gittata, set('gittata')))),
         campo('Note', inputTesto(att.note, set('note'), { placeholder: 'Es. +1d6 fuoco quando è infuocata' })),
-        anteprima,
+        anteprima, spiega,
         h('div.riga-btn',
           !nuovo ? h('button.btn.pericolo', { onclick: async () => { if (await conferma(`Eliminare "${att.nome}"?`, { si: 'Elimina', pericolo: true })) { modifica((x) => (x.attacchi = x.attacchi.filter((y) => y.id !== att.id))); chiudi(); } } }, 'Elimina') : null,
           h('button.btn.primario', { onclick: () => {
@@ -642,10 +647,11 @@ export function renderCaratteristiche(c) {
     card('Tiri salvezza',
       Number(p.bonusTiriSalvezza) ? h('p.nota', `Include ${R.segno(Number(p.bonusTiriSalvezza))} a tutti i tiri salvezza (si cambia da Eroe → Modifica).`) : null,
       R.auraProtezione(p) ? h('p.nota', `Include ${R.segno(R.auraProtezione(p))} dell'Aura di protezione (si spegne da ✎ Modifica → Regole automatiche).`) : null,
+      R.CARATTERISTICHE.some((cr) => R.tsDaPrivilegio(p, cr.id) && !p.tsComp.includes(cr.id)) ? h('p.nota', `Competenze aggiunte da sole (${[...new Set(R.CARATTERISTICHE.map((cr) => R.tsDaPrivilegio(p, cr.id)).filter(Boolean))].join(', ')}): pallino con il bordo dorato. Si spengono da ✎ Modifica → Regole automatiche.`) : null,
       R.CARATTERISTICHE.map((cr) => {
-        const b = R.bonusTS(p, cr.id), ha = p.tsComp.includes(cr.id);
+        const b = R.bonusTS(p, cr.id), ha = p.tsComp.includes(cr.id), auto = !ha && R.tsDaPrivilegio(p, cr.id);
         return h('div.riga-abilita',
-          h('button.comp' + (ha ? '.l1' : ''), { 'aria-label': 'Competenza', onclick: () => modifica((x) => { const i = x.tsComp.indexOf(cr.id); i >= 0 ? x.tsComp.splice(i, 1) : x.tsComp.push(cr.id); }) }),
+          h('button.comp' + (ha || auto ? '.l1' : '') + (auto ? '.auto' : ''), { 'aria-label': 'Competenza', onclick: () => modifica((x) => { const i = x.tsComp.indexOf(cr.id); i >= 0 ? x.tsComp.splice(i, 1) : x.tsComp.push(cr.id); }) }),
           h('button.ab-nome', { onclick: () => E.tiraCon('1d20' + fmtMod(b), `TS su ${cr.nome}`, 'ts', { d20: true }) }, cr.nome),
           h('span.ab-bonus', R.segno(b) + R.dadiEffetti(p, 'ts')));
       })),
@@ -675,7 +681,7 @@ export function renderMagie(c) {
     h('div.stat-griglia.tre',
       h('div.stat-box', ico('scudo'), h('small', 'CD incantesimi'), h('strong', cd ?? '—')),
       h('button.stat-box', { onclick: () => att != null && E.tiraCon('1d20' + fmtMod(att), 'Attacco con incantesimo', 'attacco', { d20: true }) }, ico('magie'), h('small', 'Attacco magico'), h('strong', att != null ? R.segno(att) : '—')),
-      h('button.stat-box', { onclick: apriImpostazioniMagia }, ico('stella'), h('small', 'Caratteristica'), h('strong', m.car || '—'), h('small', 'tocca'))),
+      h('button.stat-box', { onclick: apriImpostazioniMagia }, ico('stella'), h('small', 'Caratteristica'), h('strong', R.carIncantatore(p) || '—'), h('small', 'tocca'))),
     renderDaPreparare(),
     card('Slot incantesimo',
       max.some((n) => n > 0) || patto ? null : h('p.vuoto', 'Nessuno slot. Tocca "Imposta" per scegliere il tipo di incantatore o inserire gli slot a mano.'),
@@ -704,7 +710,10 @@ export function renderMagie(c) {
 // Quanti incantesimi si possono preparare e quanti trucchetti si conoscono (tabelle 2024), per ogni classe incantatrice
 function renderDaPreparare() {
   const p = pg();
-  const righe = R.elencoClassi(p).filter((c) => PREPARATI[c.classe]).map((c) => ({ c, prep: PREPARATI[c.classe][c.livello - 1], trucchi: trucchettiClasse(c.classe, c.livello) }));
+  // Cavaliere mistico e Mistificatore arcano preparano incantesimi da mago con una tabella loro (dal 3° livello)
+  const righe = R.elencoClassi(p).map((c) => c.magia === 'terzo'
+    ? { c, prep: PREPARATI_TERZO[c.livello - 1] || 0, trucchi: trucchettiTerzo(c.classe, c.livello) }
+    : PREPARATI[c.classe] ? { c, prep: PREPARATI[c.classe][c.livello - 1], trucchi: trucchettiClasse(c.classe, c.livello) } : null).filter(Boolean);
   if (!righe.length) return null;
   const preparati = p.incantesimi.filter((s) => s.livello > 0 && s.preparato && !s.sempre).length;
   const trucchi = p.incantesimi.filter((s) => s.livello === 0).length;
@@ -791,8 +800,9 @@ function apriImpostazioniMagia() {
     const disegna = () => {
       const p = pg(); const m = p.magia;
       c.replaceChildren(
-        campo('Tipo di incantatore', selezione([['nessuna', 'Nessuno'], ['piena', 'Completo (Bardo, Chierico, Druido, Mago, Stregone)'], ['mezza', 'Mezzo (Paladino, Ranger)'], ['patto', 'Magia del patto (Warlock)']], m.tipo, (v) => { modifica((x) => (x.magia.tipo = v)); disegna(); })),
-        campo('Caratteristica da incantatore', selezione([['', '—'], ['INT', 'Intelligenza'], ['SAG', 'Saggezza'], ['CAR', 'Carisma']], m.car || '', (v) => { modifica((x) => (x.magia.car = v || null)); disegna(); })),
+        campo('Tipo di incantatore', selezione([['nessuna', 'Nessuno'], ['piena', 'Completo (Bardo, Chierico, Druido, Mago, Stregone)'], ['mezza', 'Mezzo (Paladino, Ranger)'], ['terzo', 'Un terzo (Cavaliere mistico, Mistificatore arcano)'], ['patto', 'Magia del patto (Warlock)']], m.tipo, (v) => { modifica((x) => (x.magia.tipo = v)); disegna(); })),
+        R.elencoClassi(p).some((c) => c.magia === 'terzo') && m.tipo === 'nessuna' ? h('p.nota', 'La tua sottoclasse (Cavaliere mistico o Mistificatore arcano) lancia incantesimi da mago con l\'Intelligenza: slot e caratteristica sono già calcolati da soli.') : null,
+        campo('Caratteristica da incantatore', selezione([['', R.carIncantatore(p) && !m.car ? `Automatica (${R.carIncantatore(p)})` : '—'], ['INT', 'Intelligenza'], ['SAG', 'Saggezza'], ['CAR', 'Carisma']], m.car || '', (v) => { modifica((x) => (x.magia.car = v || null)); disegna(); })),
         h('label.check', h('input', { type: 'checkbox', checked: Array.isArray(m.slotManuali), onchange: (e) => { modifica((x) => (x.magia.slotManuali = e.target.checked ? R.slotMassimi({ ...x, magia: { ...x.magia, slotManuali: null } }) : null)); disegna(); } }),
           ' Inserisco gli slot a mano (multiclasse, oggetti magici…)'),
         Array.isArray(m.slotManuali) ? h('div.griglia3', m.slotManuali.map((n, i) => campo(`${i + 1}° liv.`, inputNum(n, (v) => modifica((x) => (x.magia.slotManuali[i] = Math.max(0, v))))))) : h('p.nota', 'Gli slot vengono calcolati dal livello e dal tipo di incantatore.'));
@@ -801,22 +811,58 @@ function apriImpostazioniMagia() {
   });
 }
 
+// Classi incantatrici del personaggio per il filtro del prontuario (Cavaliere mistico e Mistificatore arcano usano la lista del Mago)
+const classiIncantatrici = (p) => [...new Set(R.elencoClassi(p).filter((c) => c.magia && c.magia !== 'nessuna').map((c) => (c.magia === 'terzo' ? 'Mago' : c.classe)))];
+const normCerca = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+let filtroProntuario = { livello: 'tutti', classe: null, cerca: '' };
+
 function apriProntuario() {
-  pannello('Prontuario incantesimi', (c, chiudi) => {
-    const cerca = h('input.campo', { placeholder: 'Cerca…', type: 'search' });
+  const p = pg();
+  const mie = classiIncantatrici(p);
+  if (filtroProntuario.classe && filtroProntuario.classe !== 'tutte' && !mie.includes(filtroProntuario.classe)) filtroProntuario.classe = null;
+  filtroProntuario.classe ||= mie[0] || 'tutte';
+  pannello('Prontuario incantesimi', (c) => {
+    const f = filtroProntuario;
+    const cerca = h('input.campo', { placeholder: 'Cerca in italiano o in inglese…', type: 'search', value: f.cerca });
     const lista = h('div.lista-prontuario');
+    const chipsLiv = h('div.chips.piccoli');
+    const chipsClasse = h('div.chips.piccoli');
+    const disegnaFiltri = () => {
+      chipsLiv.replaceChildren(...[['tutti', 'Tutti'], ['0', 'Trucchetti'], ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((l) => [String(l), l + '°'])].map(([v, t]) => h('button.chip' + (f.livello === v ? '.attivo' : ''), { onclick: () => { f.livello = v; disegnaFiltri(); disegna(); } }, t)));
+      chipsClasse.replaceChildren(...[...new Set([...mie, 'tutte'])].map((cl) => h('button.chip' + (f.classe === cl ? '.attivo' : ''), { onclick: () => { f.classe = cl; disegnaFiltri(); disegna(); } }, cl === 'tutte' ? 'Tutte le classi' : cl)));
+    };
     const disegna = () => {
-      const q = cerca.value.toLowerCase();
-      lista.replaceChildren(...INCANTESIMI_BASE.filter((s) => s.nome.toLowerCase().includes(q)).map((s) => h('button.voce-prontuario', {
-        onclick: () => {
-          modifica((x) => x.incantesimi.push({ id: nuovoId(), preparato: false, ...structuredClone(s) }));
-          avviso(`${s.nome} aggiunto`); chiudi();
-        },
-      }, h('strong', s.nome), h('small', `${s.livello === 0 ? 'Trucchetto' : s.livello + '° livello'} · ${s.scuola}`))));
+      f.cerca = cerca.value;
+      const q = normCerca(cerca.value.trim());
+      const giaNomi = new Set(pg().incantesimi.map((s) => normCerca(s.nome)));
+      const voci = INCANTESIMI_2024.filter((s) => (f.livello === 'tutti' || s.livello === Number(f.livello))
+        && (f.classe === 'tutte' || s.classi.includes(f.classe))
+        && (!q || normCerca(s.nome).includes(q) || normCerca(s.en).includes(q)))
+        .sort((a, b) => a.livello - b.livello || a.nome.localeCompare(b.nome, 'it'));
+      const perLivello = {};
+      voci.slice(0, 400).forEach((s) => (perLivello[s.livello] ||= []).push(s));
+      lista.replaceChildren(...(voci.length ? Object.entries(perLivello).map(([liv, arr]) => h('div.gruppo-tratti',
+        h('h4.sottotitolo', liv === '0' ? `Trucchetti (${arr.length})` : `${liv}° livello (${arr.length})`),
+        arr.map((s) => {
+          const ce = giaNomi.has(normCerca(s.nome));
+          return h('details.tratto',
+            h('summary', s.nome, h('small.tratto-info', [s.en, s.concentrazione ? 'concentrazione' : '', s.rituale ? 'rituale' : '', ce ? 'ce l\'hai' : ''].filter(Boolean).join(' · '))),
+            h('div.inc-tabella', h('span', 'Lancio'), h('b', s.tempo), h('span', 'Gittata'), h('b', s.gittata), h('span', 'Componenti'), h('b', s.componenti), h('span', 'Durata'), h('b', s.durata)),
+            h('p', s.descrizione),
+            h('p.nota', `${s.scuola} · ${s.classi.join(', ')}`),
+            h('button.btn.primario', { onclick: (e) => {
+              const pr = !!(s.livello > 0 && R.elencoClassi(pg()).some((cl) => cl.magia === 'patto' || ['Bardo', 'Stregone', 'Ranger'].includes(cl.classe)));
+              modifica((x) => x.incantesimi.push({ id: nuovoId(), nome: s.nome, en: s.en, livello: s.livello, scuola: s.scuola, tempo: s.tempo, gittata: s.gittata,
+                componenti: s.componenti, durata: s.durata, descrizione: s.descrizione, concentrazione: s.concentrazione, rituale: s.rituale, preparato: pr }));
+              avviso(`${s.nome} aggiunto`);
+              e.currentTarget.closest('details').querySelector('summary small').textContent += ' · ce l\'hai';
+            } }, ce ? `Aggiungi di nuovo ${s.nome}` : `Aggiungi ${s.nome}`));
+        }))) : [h('p.vuoto', 'Nessun incantesimo trovato con questi filtri.')]));
     };
     cerca.addEventListener('input', disegna);
-    c.append(h('p.nota', 'Una selezione di incantesimi comuni. Puoi modificarli dopo averli aggiunti, o crearne di nuovi.'), cerca, lista);
-    disegna();
+    c.append(h('p.nota', 'Tutti i 391 incantesimi del Manuale del Giocatore 2024 (riassunti in italiano). Tocca un incantesimo per leggerlo e aggiungerlo; dopo puoi modificarlo.'),
+      cerca, chipsLiv, chipsClasse, lista);
+    disegnaFiltri(); disegna();
   }, { pieno: true });
 }
 

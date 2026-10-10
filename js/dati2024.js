@@ -309,10 +309,20 @@ export function trucchettiClasse(classe, l) {
   const base = { Bardo: 2, Chierico: 3, Druido: 2, Stregone: 4, Warlock: 2, Mago: 3 }[classe];
   return base ? base + (l >= 4 ? 1 : 0) + (l >= 10 ? 1 : 0) : 0;
 }
+// Cavaliere mistico (Guerriero) e Mistificatore arcano (Ladro): incantesimi preparati per livello di classe (dal 3°,
+// stessa tabella per entrambi) e trucchetti da mago (Cavaliere 2, Mistificatore 3 con Mano magica; uno in più al 10°)
+export const PREPARATI_TERZO = [0, 0, 3, 4, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 11, 11, 12, 13];
+export const trucchettiTerzo = (classe, l) => (l < 3 ? 0 : (classe === 'Ladro' ? 3 : 2) + (l >= 10 ? 1 : 0));
 
 // ───────────────────────── Acquisto a punti (capitolo 2) ─────────────────────────
 // 27 punti da spendere; ogni punteggio parte da 8 e arriva al massimo a 15 (prima degli aumenti del background)
 export const COSTO_PUNTI = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 };
+// Serie standard consigliata per classe (tabella del capitolo 2): FOR, DES, COS, INT, SAG, CAR
+export const SERIE_PER_CLASSE = {
+  Barbaro: [15, 13, 14, 10, 12, 8], Bardo: [8, 14, 12, 13, 10, 15], Chierico: [14, 8, 13, 10, 15, 12], Druido: [8, 12, 14, 13, 15, 10],
+  Guerriero: [15, 14, 13, 8, 10, 12], Monaco: [12, 15, 13, 10, 14, 8], Paladino: [15, 10, 13, 8, 12, 14], Ranger: [12, 15, 13, 8, 14, 10],
+  Ladro: [12, 15, 13, 14, 10, 8], Stregone: [10, 13, 14, 8, 12, 15], Warlock: [8, 14, 13, 12, 10, 15], Mago: [8, 12, 13, 15, 14, 10],
+};
 export const PUNTI_DISPONIBILI = 27;
 
 // Caratteristiche principali di ogni classe: per il multiclasse serve almeno 13 in quelle della classe nuova

@@ -476,6 +476,13 @@ textarea.campo { resize: vertical; line-height: 1.5; }
 .fab-dadi .ico { width: 30px; height: 30px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6)); }
 .fab-dadi:active { transform: scale(.9) rotate(-18deg); }
 body[data-schermata="elenco"] .fab-dadi, body[data-schermata="wizard"] .fab-dadi { display: none; }
+/* Promemoria del modo di tiro scelto (vantaggio / svantaggio resta attivo finché non lo cambi) */
+body[data-modo-tiro="vantaggio"] .fab-dadi::after, body[data-modo-tiro="svantaggio"] .fab-dadi::after {
+  position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center;
+  font: 800 .78rem/1 var(--font-titoli); color: #fff; border: 2px solid #fff3d0; box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
+}
+body[data-modo-tiro="vantaggio"] .fab-dadi::after { content: "V"; background: #2e8a52; }
+body[data-modo-tiro="svantaggio"] .fab-dadi::after { content: "S"; background: #a3241b; }
 
 /* ───────── Vista 3D ───────── */
 .vista3d {
@@ -709,6 +716,8 @@ button.stat-box:active { transform: scale(.96); }
 .comp.l1 { background: var(--moneta); border-color: var(--metallo-bordo); box-shadow: 0 0 8px rgba(var(--oro-chiaro-rgb), .5); }
 .comp.l2 { background: radial-gradient(circle at 35% 30%, #ff9a8a, #b4231b 55%, #5a0b08); border-color: #f2d894; box-shadow: 0 0 0 3px rgba(var(--oro-rgb), .3), 0 0 10px rgba(230, 60, 50, .55); }
 .comp.l2::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: #fff0c0; }
+/* Competenza data da un privilegio (regola automatica): stesso pallino pieno con un anello dorato tratteggiato */
+.comp.l1.auto { outline: 2px dashed rgba(var(--oro-chiaro-rgb), .9); outline-offset: 2px; }
 .ab-nome { flex: 1; text-align: left; padding: 11px 0; font-size: 1.02rem; }
 .ab-nome small { color: var(--testo-3); font: 500 .74rem var(--font-sc); margin-left: 2px; }
 .ab-bonus { font: 700 1.2rem var(--font-titoli); min-width: 44px; text-align: right; color: var(--oro-chiaro); }
@@ -809,6 +818,8 @@ button.stat-box:active { transform: scale(.96); }
 .tratto summary::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 11px 3px 3px; transform: rotate(45deg); background: var(--oro); vertical-align: middle; transition: box-shadow .2s, transform .2s; }
 .tratto[open] summary::before { transform: rotate(45deg) scale(1.3); box-shadow: 0 0 8px var(--oro-chiaro); }
 .tratto[open] summary { color: var(--oro-chiaro); }
+/* Sui fogli chiari (pannelli, pergamena) l'oro chiaro non si legge: si usa il colore dei titoli */
+.pannello .tratto[open] summary, .superficie-carta .tratto[open] summary { color: var(--titolo); }
 .tratto p { white-space: pre-wrap; margin: 0 0 8px; font-size: .96rem; color: var(--testo-2); -webkit-user-select: text; user-select: text; }
 
 /* ───────── Fogli di pergamena (pannelli dal basso) ───────── */
@@ -1149,6 +1160,7 @@ button.stat-box:active { transform: scale(.96); }
 .master .comp-nome strong { color: var(--oro-chiaro); }
 .master .compagno.critico .comp-pf strong { color: #ff7a6a; }
 .comp-extra { display: block; margin-top: 4px; color: var(--testo-2); font-size: .78rem; }
+.comp-avviso { display: block; margin-top: 4px; padding: 3px 8px; border-radius: 8px; background: rgba(163, 36, 27, .12); color: #8a1c14; font-size: .78rem; font-weight: 700; }
 .comp-morte { display: block; margin-top: 3px; color: var(--pericolo-testo); font-size: .8rem; font-weight: 700; }
 
 .barra-azioni-master { position: fixed; left: 0; right: 0; bottom: calc(0px - var(--fondo-perso, 0px)); z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;

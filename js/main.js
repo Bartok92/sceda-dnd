@@ -14,7 +14,8 @@ import * as T from './tavolo.js';
 import * as E from './effetti.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.13.0';
+export const VERSIONE_APP = '1.14.0';
+document.documentElement.dataset.versioneApp = VERSIONE_APP;   // letta dal tavolo di gioco (tavolo.js)
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
 const QUALITA_PREDEFINITA = EDIZIONE_IPHONE ? 'massima' : 'bilanciata';
@@ -106,7 +107,7 @@ async function mostraElenco() {
       h('p', 'Per portare qui i tuoi personaggi: nella vecchia app tocca "Backup completo" e salva il file; poi qui tocca "Ripristina" e sceglilo. Arrivano anche i modelli 3D e i tavoli di gioco.')) : null,
     elenco.length ? h('div.lista-pg', elenco.map((p) => h('div.pg-card', { onclick: (e) => !e.target.closest('button') && apriPersonaggio(p.id) },
       h('div.pg-card-icona', sigillo(p.classe)),
-      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })}`), h('span.pg-livello', p.livello),
+      h('div.pg-card-info', h('strong', p.nome), h('small', `${p.razza} · ${testoClassi(p, { sottoclassi: false })} · PF ${p.pf.att}/${p.pf.max}`), h('span.pg-livello', p.livello),
         h('div.barra.mini', h('div.barra-riemp', { style: { width: Math.max(0, Math.min(100, (p.pf.att / p.pf.max) * 100)) + '%' } }))),
       h('button.btn-icona', { 'aria-label': 'Opzioni', onclick: () => menuPersonaggio(p) }, '⋮')))) :
       h('div.card.vuota', h('p', 'Nessun personaggio ancora.'), h('p.nota', 'Crea il tuo primo eroe con la procedura guidata.')),
@@ -118,7 +119,7 @@ async function mostraElenco() {
     h('div.riga-btn', pulsanteTema(() => apriSceltaTema())),
     elenco.length && (!ultimoBackup || Date.now() - ultimoBackup > 14 * 864e5) ? h('p.nota.centrato', ultimoBackup ? `Ultimo backup: ${new Date(ultimoBackup).toLocaleDateString('it-IT')}. Fanne uno nuovo ogni tanto!` : 'Consiglio: fai un backup ogni tanto, per non perdere nulla.') : null,
     h('button.btn-link.centrato', { onclick: apriImpostazioni }, '⚙ Impostazioni e informazioni'),
-    h('p.piede', `Versione ${VERSIONE_APP}${EDIZIONE_IPHONE ? ' (iPhone)' : ''} · Dungeons & Dragons è un marchio di Wizards of the Coast. Regole dal SRD 5.1 e 5.2 (CC-BY-4.0).`)));
+    h('p.piede', `Versione ${VERSIONE_APP}${EDIZIONE_IPHONE ? ' (iPhone)' : ''} · Regole del Manuale del Giocatore 2024, riassunte in italiano. App non ufficiale: Dungeons & Dragons è un marchio di Wizards of the Coast.`)));
 }
 
 function menuPersonaggio(p) {
@@ -223,7 +224,7 @@ async function apriImpostazioni() {
       h('div.crediti',
         h('p', `Scheda D&D versione ${VERSIONE_APP}${EDIZIONE_IPHONE ? ' · edizione iPhone' : ''}. Funziona senza internet: tutti i dati restano sul tuo telefono.`),
         h('p', 'Caratteri: Cinzel, Cinzel Decorative e Alegreya (SIL Open Font License). Grafica 3D: three.js (licenza MIT). Tavolo di gioco: PeerJS (MIT), jsQR (Apache 2.0), qrcode-generator (MIT). Personaggio di esempio: "Robot Expressive" di Tomás Laulhé / Quaternius (CC0). Oggetti 3D di esempio creati per questa app (CC0).'),
-        h('p', 'Regole e incantesimi dal System Reference Document 5.1 di Wizards of the Coast (CC-BY-4.0).')));
+        h('p', 'Regole secondo il Manuale del Giocatore 2024 di Wizards of the Coast: descrizioni di privilegi, talenti, incantesimi ed equipaggiamento riassunte in italiano per l\'app (non sono il testo del manuale). Parte dei dati viene dal System Reference Document 5.1 e 5.2 (CC-BY-4.0). App non ufficiale.')));
   });
 }
 
@@ -412,6 +413,13 @@ function registraSW() {
       document.body.append(b);
     };
     if (reg.waiting && navigator.serviceWorker.controller) mostra(reg.waiting);
+    // L'app installata resta aperta per giorni: quando torna in primo piano controlla se c'è una versione nuova
+    // (al massimo ogni 30 minuti), così al tavolo tutti hanno presto la stessa versione
+    let ultimoControllo = Date.now();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || Date.now() - ultimoControllo < 30 * 60e3) return;
+      ultimoControllo = Date.now(); reg.update().catch(() => {});
+    });
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) mostra(w); });
