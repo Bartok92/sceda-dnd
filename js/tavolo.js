@@ -17,7 +17,7 @@
 //   immagini viaggiano a pezzi, su richiesta, solo verso chi le può vedere.
 import { h, $, avviso, pannello, conferma, chiediTesto, vibra, campo } from './ui.js';
 import { db, nuovoId } from './db.js';
-import { stato, suCambio, modifica } from './stato.js';
+import { stato, suCambio, modifica, salvaPresto } from './stato.js';
 import * as R from './regole.js';
 import { ico, sigillo } from './icone.js';
 import { applicaPF, avvisaMorte, riposoBreve, riposoLungo } from './scheda.js';
@@ -127,12 +127,59 @@ export const versioneApp = () => document.documentElement.dataset.versioneApp ||
 export const versionePiuVecchia = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); return false; };
 
-// Quello che si mostra ai compagni (e al Master)
-function istantanea(pg) {
+// ───── Segreti del Master ─────
+// Il Master può fare qualcosa a un giocatore "in segreto": il telefono del giocatore applica tutto, ma ai compagni continua a
+// mostrare PF e condizioni come se non fosse successo niente. pg.segreti = { pf, temp, condizioni, finte }:
+// pf/temp = quanto aggiungere ai valori veri per ottenere quelli visti dal gruppo; condizioni = vere ma nascoste;
+// finte = tolte in segreto ma che il gruppo vede ancora. Il Master vede i valori veri e può svelare tutto.
+export function vistaPubblica(pg) {
+  const s = pg.segreti;
+  const pf = { att: pg.pf.att, max: pg.pf.max, temp: pg.pf.temp || 0 };
+  let condizioni = [...(pg.condizioni || [])];
+  let tsMorte = { ...(pg.tsMorte || { succ: 0, fall: 0 }) };
+  if (s) {
+    pf.att = Math.max(0, Math.min(pf.max, pf.att + (Number(s.pf) || 0)));
+    pf.temp = Math.max(0, pf.temp + (Number(s.temp) || 0));
+    condizioni = condizioni.filter((c) => !(s.condizioni || []).includes(c));
+    for (const c of s.finte || []) if (!condizioni.includes(c)) condizioni.push(c);
+    if (pf.att > 0) tsMorte = { succ: 0, fall: 0 };
+  }
+  return { pf, condizioni, tsMorte };
+}
+// Tiene i segreti coerenti dopo i cambiamenti "normali" (cure, danni, condizioni tolte…); restituisce true se li ha cambiati
+export function normalizzaSegreti(pg) {
+  const s = pg?.segreti; if (!s) return false;
+  const prima = JSON.stringify(s);
+  let off = Number(s.pf) || 0;
+  if (pg.pf.att + off > pg.pf.max) off = pg.pf.max - pg.pf.att;   // una cura vista da tutti "assorbe" i danni segreti
+  if (pg.pf.att + off < 0) off = -pg.pf.att;
+  s.pf = off;
+  let t = Number(s.temp) || 0;
+  if ((pg.pf.temp || 0) + t < 0) t = -(pg.pf.temp || 0);
+  s.temp = t;
+  s.condizioni = (s.condizioni || []).filter((c) => pg.condizioni.includes(c));
+  s.finte = (s.finte || []).filter((c) => !pg.condizioni.includes(c));
+  if (!s.pf && !s.temp && !s.condizioni.length && !s.finte.length) delete pg.segreti;
+  return JSON.stringify(pg.segreti || null) !== prima;
+}
+// Testo breve di cosa il gruppo non vede (per il Master e per il giocatore)
+export function testoSegreti(pg) {
+  const s = pg?.segreti; if (!s) return '';
+  const v = vistaPubblica(pg); const parti = [];
+  if (v.pf.att !== pg.pf.att) parti.push(`gli altri vedono ${v.pf.att}/${pg.pf.max} PF (veri ${pg.pf.att})`);
+  if (v.pf.temp !== (pg.pf.temp || 0)) parti.push(`PF temporanei visti ${v.pf.temp} (veri ${pg.pf.temp || 0})`);
+  if (s.condizioni?.length) parti.push('condizioni nascoste: ' + s.condizioni.map(nomeCondizione).join(', '));
+  if (s.finte?.length) parti.push('vedono ancora: ' + s.finte.map(nomeCondizione).join(', '));
+  return parti.join(' · ');
+}
+
+// Quello che si mostra ai compagni (e al Master). reale: senza i segreti del Master (per il giocatore stesso)
+function istantanea(pg, { reale = false } = {}) {
+  const v = reale ? { pf: { att: pg.pf.att, max: pg.pf.max, temp: pg.pf.temp || 0 }, condizioni: [...(pg.condizioni || [])], tsMorte: { ...(pg.tsMorte || { succ: 0, fall: 0 }) } } : vistaPubblica(pg);
   return {
     id: pg.id, nome: pg.nome, razza: pg.razza, classe: pg.classe, classi: R.testoClassi(pg, { sottoclassi: false }), livello: pg.livello,
-    pf: { att: pg.pf.att, max: pg.pf.max, temp: pg.pf.temp || 0 }, ca: R.classeArmatura(pg),
-    condizioni: [...(pg.condizioni || [])], sfinimento: Number(pg.sfinimento) || 0, tsMorte: { ...(pg.tsMorte || { succ: 0, fall: 0 }) },
+    pf: v.pf, ca: R.classeArmatura(pg),
+    condizioni: v.condizioni, sfinimento: Number(pg.sfinimento) || 0, tsMorte: v.tsMorte,
     percezione: R.percezionePassiva(pg), iniziativa: R.iniziativa(pg), velocita: R.velocitaEffettiva(pg).valore,
     effetti: (pg.effetti || []).map((e) => e.nome), concentrazione: pg.concentrazione?.nome || null,
     app: versioneApp(),   // versione dell'app di questo telefono (il Master vede chi deve aggiornare)
@@ -236,6 +283,16 @@ function ricomponi(m) {
   try { return JSON.parse(r.parti.join('')); } catch (e) { console.warn('Tavolo: messaggio a pezzi non valido', e); return null; }
 }
 function aTutti(msg, tranne = null) { for (const c of S.conns.keys()) if (c !== tranne) inviaA(c, msg); }
+// Voci del registro verso tutti, ma quelle segrete (v.per) solo a chi le può vedere
+function diffondiVoci(voci, tranne = null) {
+  for (const [c, id] of S.conns) {
+    if (c === tranne) continue;
+    const vis = voci.filter((v) => !v.per || v.per.includes(id));
+    if (vis.length) inviaA(c, { tipo: 'voci', voci: vis });
+  }
+}
+// Una voce del registro è visibile a questo telefono? (le segrete solo al giocatore interessato e al Master)
+const vedeVoce = (v) => !v.per || !!S.io?.master || v.per.includes(S.io?.id) || v.per.includes(mioPgId());
 function invia(msg) {
   if (S.ruolo === 'host') aTutti(msg);
   else inviaA(S.conn, msg);
@@ -283,7 +340,7 @@ function messaggioCiao(tv) {
   const vuoleCentralino = !!S.io.master && Date.now() - S.rinunciaCentralino > 10 * 60e3;
   const coda = Object.values(tv.inAttesa || {}).flat();
   return { tipo: 'ciao', protocollo: PROTOCOLLO, io: S.io, pg: S.io.master ? null : tv.membri[S.io.id], nome: tv.nome, membri: tv.membri,
-    registro: tv.registro.slice(-300), vuoleCentralino, coda: coda.length ? coda : undefined, ponte: ponte || undefined };
+    registro: tv.registro.filter((v) => !v.per).slice(-300), vuoleCentralino, coda: coda.length ? coda : undefined, ponte: ponte || undefined };
 }
 
 // Troppi tentativi a vuoto: si spiega cosa fare (una volta), ma si continua a provare
@@ -532,11 +589,11 @@ function riceviHost(c, m) {
     const nuove = uniscRegistro(tv, m.registro);
     if (/^Tavolo [A-Z0-9]{6}$/.test(tv.nome) && m.nome && !/^Tavolo [A-Z0-9]{6}$/.test(m.nome)) tv.nome = m.nome;
     imparaPonte(m.ponte);
-    inviaA(c, { tipo: 'benvenuto', protocollo: PROTOCOLLO, ponte: ponte || undefined, nome: tv.nome, membri: tv.membri, registro: tv.registro, presenti: [...S.presenti], master: tv.master || null, turno: tv.turno || null });
+    inviaA(c, { tipo: 'benvenuto', protocollo: PROTOCOLLO, ponte: ponte || undefined, nome: tv.nome, membri: tv.membri, registro: tv.registro.filter((v) => !v.per || v.per.includes(id)), presenti: [...S.presenti], master: tv.master || null, turno: tv.turno || null });
     if (m.pg) aTutti({ tipo: 'stato', pg: m.pg }, c);
     if (m.io.master) aTutti({ tipo: 'master', master: tv.master }, c);
     aTutti({ tipo: 'presenti', presenti: [...S.presenti] }, c);
-    if (nuove.length) aTutti({ tipo: 'voci', voci: nuove }, c);
+    if (nuove.length) diffondiVoci(nuove, c);
     segnaArrivo(tv, m.io);
     for (const chi of S.presenti) consegnaCoda(tv, chi);
     // Arriva il Master e il centralino è il telefono di un giocatore: gli passo il ruolo (più stabile per tutti)
@@ -545,8 +602,11 @@ function riceviHost(c, m) {
     tv.membri[m.pg.id] = m.pg;
     aTutti({ tipo: 'stato', pg: m.pg }, c);
   } else if (m.tipo === 'voci') {
-    const nuove = uniscRegistro(tv, m.voci);
-    if (nuove.length) aTutti({ tipo: 'voci', voci: nuove }, c);
+    // Le voci segrete (v.per) le tengo solo se riguardano me; le giro comunque solo a chi le può vedere
+    const voci = (m.voci || []).filter((v) => v && v.id);
+    const nuove = uniscRegistro(tv, voci.filter(vedeVoce));
+    const daGirare = [...nuove, ...voci.filter((v) => v.per && !vedeVoce(v))];
+    if (daGirare.length) diffondiVoci(daGirare, c);
     applicaNomeDaVoci(tv, nuove);
   } else if (m.a) {
     consegna(m);            // messaggio diretto (azione, risposta): va a destinazione
@@ -646,13 +706,14 @@ export function mandaA(destId, dati) {
 
 // ───────────────────────── Registro ─────────────────────────
 
+// extra.per = [id…]: voce segreta, la vedono solo quei partecipanti (e il Master)
 function aggiungiVoce(testo, extra = {}) {
   const tv = tavoloDa(S.codice);
   if (!tv) return;
   const t = Date.now();
   const v = { id: nuovoId(), t, serata: serataDi(t), testo, pg: S.io?.id, ...extra };
   uniscRegistro(tv, [v]);
-  invia({ tipo: 'voci', voci: [v] });
+  if (S.ruolo === 'host') diffondiVoci([v]); else inviaA(S.conn, { tipo: 'voci', voci: [v] });
   salvaTavoli(); aggiornaViste();
 }
 export const scriviNelRegistro = (testo, extra) => aggiungiVoce(testo, extra);
@@ -724,6 +785,14 @@ function riceviScheda(m) {
   (tv.schede ||= {})[m.pg.id] = { pg: m.pg, t: m.t || Date.now() };
 }
 export const schedaDi = (id) => tavoloAttivo()?.schede?.[id] || null;
+// Per il Master: il giocatore com'è davvero (i compagni vedono la versione senza i segreti, vedi vistaPubblica)
+export function membroReale(m) {
+  if (!S.io?.master || !m) return m;
+  const pg = schedaDi(m.id)?.pg;
+  if (!pg?.segreti) return m;
+  return { ...m, pf: { att: pg.pf.att, max: pg.pf.max, temp: pg.pf.temp || 0 }, condizioni: [...(pg.condizioni || [])],
+    tsMorte: { ...(pg.tsMorte || { succ: 0, fall: 0 }) }, segreti: testoSegreti(pg) || 'qualcosa di segreto' };
+}
 export function chiediSchede(ids) {
   let ok = 0;
   for (const id of ids) if (mandaA(id, { tipo: 'richiesta', cosa: 'scheda' })) ok++;
@@ -945,6 +1014,7 @@ export function apriContenuto(c, { dalMaster = false, datiImmagine = null } = {}
 function pubblicaStato({ annota = true } = {}) {
   const tv = tavoloDa(S.codice);
   if (!tv || !mioPgId() || stato.pg?.id !== mioPgId()) return;
+  if (normalizzaSegreti(stato.pg)) salvaPresto();
   const prima = tv.membri[S.io.id];
   const dopo = istantanea(stato.pg);
   if (confrontabile(dopo) === confrontabile(prima)) return;
@@ -980,6 +1050,7 @@ function descriviAzione(az, da, chi, prima, dopo) {
   if (az.tipo === 'rimuoviCondizione') return `${da} toglie a ${chi}: ${[...(az.condizioni || []).map(nomeCondizione), az.sfinimento ? '1 livello di Sfinimento' : null].filter(Boolean).join(', ')}${motivo}`;
   if (az.tipo === 'stabilizza') return `${da} stabilizza ${chi}${motivo}`;
   if (az.tipo === 'revivifica') return `${da} riporta in vita ${chi}!${motivo}`;
+  if (az.tipo === 'svela') return `${da} svela cosa è successo a ${chi}: ora tutti vedono la sua scheda com'è davvero`;
   return `${da} → ${chi}`;
 }
 export const testoMonete = (m = {}) => R.MONETE.filter((c) => Number(m[c.id]) > 0).map((c) => `${m[c.id]} ${c.sigla || c.id}`).join(', ') || 'nessuna moneta';
@@ -995,7 +1066,16 @@ function applicaAzione(m) {
   const az = m.azione || {};
   const prima = { pf: { ...stato.pg.pf }, condizioni: [...stato.pg.condizioni], tsMorte: { ...stato.pg.tsMorte },
     pe: stato.pg.pe, ispirazione: stato.pg.ispirazione, monete: { ...stato.pg.monete }, livello: stato.pg.livello,
-    effetti: structuredClone(stato.pg.effetti || []), sfinimento: stato.pg.sfinimento };
+    effetti: structuredClone(stato.pg.effetti || []), sfinimento: stato.pg.sfinimento, segreti: structuredClone(stato.pg.segreti || null) };
+  // Il Master svela i suoi segreti: da ora i compagni vedono la scheda com'è davvero (e il registro annota i cambiamenti)
+  if (az.tipo === 'svela') {
+    modifica((x) => { delete x.segreti; });
+    pubblicaStato({ annota: true });
+    const t = descriviAzione(az, m.da?.nome || 'Il Master', stato.pg.nome);
+    aggiungiVoce(t, { tipo: 'condizione' });
+    avviso('Il Master ha svelato i suoi segreti: ora i compagni vedono la tua scheda com\'è davvero.');
+    return;
+  }
   let idOggetto = null; let esito = {};
   modifica((x) => {
     const v = Math.max(0, Number(az.valore) || 0);
@@ -1028,10 +1108,33 @@ function applicaAzione(m) {
     }
     else if (az.tipo === 'stabilizza') { if (x.pf.att <= 0) x.tsMorte = { succ: 3, fall: x.tsMorte?.fall || 0 }; }
     else if (az.tipo === 'revivifica') { if (x.pf.att <= 0) { x.pf.att = 1; x.tsMorte = { succ: 0, fall: 0 }; } }
+    // Azione segreta del Master: i compagni devono continuare a vedere PF e condizioni di prima
+    if (az.segreto) {
+      const s = (x.segreti ||= { pf: 0, temp: 0, condizioni: [], finte: [] });
+      s.condizioni ||= []; s.finte ||= [];
+      s.pf = (Number(s.pf) || 0) - (x.pf.att - prima.pf.att);
+      s.temp = (Number(s.temp) || 0) - ((x.pf.temp || 0) - (prima.pf.temp || 0));
+      for (const c of x.condizioni) if (!prima.condizioni.includes(c)) {
+        if (s.finte.includes(c)) s.finte = s.finte.filter((y) => y !== c);   // il gruppo la vedeva già
+        else if (!s.condizioni.includes(c)) s.condizioni.push(c);
+      }
+      for (const c of prima.condizioni) if (!x.condizioni.includes(c)) {
+        if (s.condizioni.includes(c)) s.condizioni = s.condizioni.filter((y) => y !== c);   // era già segreta
+        else if (!s.finte.includes(c)) s.finte.push(c);
+      }
+    }
   });
   const testo = descriviAzione(az, m.da?.nome || 'Qualcuno', stato.pg.nome, prima.pf, stato.pg.pf);
   pubblicaStato({ annota: false });
-  aggiungiVoce(testo, { tipo: az.tipo === 'condizione' ? 'condizione' : az.tipo === 'danno' ? 'danno' : az.tipo === 'effetto' || az.tipo === 'fineEffetto' ? 'livello' : 'pf' });
+  // Le azioni segrete restano nel registro solo per questo giocatore e per il Master; la scheda vera arriva subito al Master
+  const segreta = az.segreto ? { per: [mioPgId(), m.da?.id].filter(Boolean) } : {};
+  // Azione visibile a tutti su chi ha dei segreti: nel registro i PF sono quelli che vede il gruppo, non quelli veri
+  const testoRegistro = !az.segreto && (prima.segreti || stato.pg.segreti)
+    ? descriviAzione(az, m.da?.nome || 'Qualcuno', stato.pg.nome,
+      vistaPubblica({ pf: prima.pf, condizioni: prima.condizioni, tsMorte: prima.tsMorte, segreti: prima.segreti || undefined }).pf, vistaPubblica(stato.pg).pf)
+    : testo;
+  aggiungiVoce(testoRegistro, { tipo: az.tipo === 'condizione' ? 'condizione' : az.tipo === 'danno' ? 'danno' : az.tipo === 'effetto' || az.tipo === 'fineEffetto' ? 'livello' : 'pf', ...segreta });
+  if (az.segreto) setTimeout(() => inviaSchedaAlMaster({ forza: true }), 100);
   if (az.tipo === 'fineEffetto') { avviso(testo); return; }   // la fine di un effetto non si annulla
   // Incapacitato (o a 0 PF) perde la concentrazione; altrimenti un danno chiede il TS di concentrazione
   const persaConc = (az.tipo === 'danno' || az.tipo === 'condizione') && E.controllaIncapacitato(R.CONDIZIONI.find((c) => c.id === az.id)?.nome);
@@ -1044,16 +1147,17 @@ function applicaAzione(m) {
     const prossimo = R.SOGLIE_PE[stato.pg.livello];
     if (prossimo != null && stato.pg.pe >= prossimo && (prima.pe || 0) < prossimo) setTimeout(() => avviso(`Hai abbastanza PE per salire al livello ${stato.pg.livello + 1}! Tocca "Sali di livello" nella scheda.`), 1500);
   }
-  avvisoConAzione(testo.replace(`${stato.pg.nome}: `, '').replace(` → ${stato.pg.nome}`, ''), 'Annulla', () => {
+  avvisoConAzione((az.segreto ? '🕶 In segreto (i compagni non lo vedono): ' : '') + testo.replace(`${stato.pg.nome}: `, '').replace(` → ${stato.pg.nome}`, ''), 'Annulla', () => {
     modifica((x) => {
       x.pf = { ...prima.pf }; x.condizioni = [...prima.condizioni]; x.tsMorte = { ...prima.tsMorte };
       x.pe = prima.pe; x.ispirazione = prima.ispirazione; x.monete = { ...prima.monete };
       x.effetti = structuredClone(prima.effetti); x.sfinimento = prima.sfinimento;
+      if (prima.segreti) x.segreti = structuredClone(prima.segreti); else delete x.segreti;
       if (idOggetto) x.inventario = x.inventario.filter((o) => o.id !== idOggetto);
     });
     pubblicaStato({ annota: false });
-    aggiungiVoce(`${stato.pg.nome} annulla: ${testo}`, { tipo: 'annulla' });
-  }, az.tipo === 'danno' ? 'danno' : '');
+    aggiungiVoce(`${stato.pg.nome} annulla: ${testo}`, { tipo: 'annulla', ...segreta });
+  }, az.tipo === 'danno' ? 'danno' : '', az.segreto ? 12000 : 9000);
   if (az.tipo === 'danno' && (esito.morte || stato.pg.pf.att <= 0)) setTimeout(() => avvisaMorte(esito, stato.pg), 1200);
 }
 
@@ -1285,13 +1389,14 @@ export function elencoCompagni(tv, { soloAltri = false } = {}) {
 export function registroPerSerata(tv, { limite = 80 } = {}) {
   const gruppi = new Map();
   for (const v of [...tv.registro].reverse()) {
+    if (!vedeVoce(v)) continue;
     if (!gruppi.has(v.serata)) gruppi.set(v.serata, []);
     gruppi.get(v.serata).push(v);
   }
   if (!gruppi.size) return h('p.nota', 'Il registro è vuoto: qui compariranno ferite, cure e condizioni di tutti, divise per serata.');
   let i = 0;
   return h('div.registro', [...gruppi].map(([s, voci]) => {
-    const righe = voci.slice(0, limite).map((v) => h('div.voce' + (v.tipo ? '.voce-' + v.tipo : ''), h('span.voce-ora', ora(v.t)), h('span.voce-testo', v.testo)));
+    const righe = voci.slice(0, limite).map((v) => h('div.voce' + (v.tipo ? '.voce-' + v.tipo : '') + (v.per ? '.voce-segreta' : ''), h('span.voce-ora', ora(v.t)), h('span.voce-testo', v.per ? '🕶 ' + v.testo : v.testo)));
     return h('details.serata', { open: i++ === 0 }, h('summary', nomeSerata(s), h('small', ` · ${voci.length} ${voci.length === 1 ? 'evento' : 'eventi'}`)), righe);
   }));
 }
@@ -1407,7 +1512,8 @@ function contenutoTavolo({ master }) {
     !S.io?.master ? sezioneDalMaster(tv) : null,
     h('h3.card-titolo', 'Compagni'),
     !S.io?.master ? h('p.nota', 'Tocca un compagno per curarlo o dargli PF temporanei: il suo telefono li riceve subito.') : null,
-    h('div.compagni', elencoCompagni(tv).map((m) => schedaCompagno(m, {
+    stato.pg?.segreti && !S.io?.master ? h('p.nota.segreto-giocatore', '🕶 Il Master ti ha fatto qualcosa in segreto: ' + testoSegreti(stato.pg) + '. Tienilo per te finché non lo svela.') : null,
+    h('div.compagni', elencoCompagni(tv).map((m) => schedaCompagno(m.id === mioPgId() && stato.pg?.id === m.id ? { ...m, ...istantanea(stato.pg, { reale: true }) } : m, {
       presente: S.presenti.has(m.id), io: m.id === mioPgId(),
       onclick: m.id !== mioPgId() && !S.io?.master ? () => azioniSuCompagno(m) : null,
     }))),
@@ -1556,6 +1662,7 @@ export function renderStrisciaCompagni(c) {
         const cose = (tv.vetrina || []).filter((c) => !c.visto).length;
         return msg || cose ? h('div.avviso-master', [msg ? `✉ ${msg} ${msg === 1 ? 'messaggio' : 'messaggi'} dal Master` : null, cose ? `📜 ${cose} ${cose === 1 ? 'cosa nuova' : 'cose nuove'} da vedere` : null].filter(Boolean).join(' · ')) : null;
       })(),
+      stato.pg?.segreti ? h('div.avviso-master', '🕶 Segreto del Master: ' + testoSegreti(stato.pg)) : null,
       altri.length ? altri.map((m) => {
         const col = coloreBarra(m);
         return h('div.striscia-riga' + (S.presenti.has(m.id) ? '' : '.assente'),

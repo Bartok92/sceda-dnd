@@ -336,6 +336,7 @@ export async function riposoLungo({ senzaConferma = false } = {}) {
     x.tsMorte = { succ: 0, fall: 0 };
     if (x.sfinimento > 0) x.sfinimento--;
     if (ispira) x.ispirazione = true;   // Umano: Intraprendente
+    if (x.segreti) { x.segreti.pf = 0; x.segreti.temp = 0; }   // PF segreti del Master: dopo il riposo tutti vedono i PF pieni
   });
   await E.dopoRiposo('lungo');
   modifica((x) => { x.pf.att = x.pf.max; });   // dopo aver tolto gli effetti (es. Aiuto) i PF restano al massimo

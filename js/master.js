@@ -192,10 +192,16 @@ async function modificaVoce(v) {
 // ───────── Azioni sui giocatori selezionati ─────────
 function bersagli() {
   const tv = T.tavoloAttivo();
-  return tv ? [...M.selezionati].map((id) => tv.membri[id]).filter(Boolean) : [];
+  return tv ? [...M.selezionati].map((id) => T.membroReale(tv.membri[id])).filter(Boolean) : [];
 }
 function nomiBersagli(b) { return b.length > 2 ? `${b.length} giocatori` : b.map((m) => m.nome).join(' e '); }
 function avvisaAssenti(b) { return b.some((m) => !T.presente(m.id)) ? h('p.nota', 'Chi non è collegato lo riceverà appena torna al tavolo.') : null; }
+
+// Azioni segrete: il giocatore le riceve, i compagni non vedono niente (né nel registro né su PF e condizioni)
+const opzioneSegreto = () => h('label.check.opzione-segreto', h('input', { type: 'checkbox', checked: !!M.segreto, onchange: (e) => (M.segreto = e.target.checked) }),
+  h('span', h('strong', '🕶 In segreto'), h('small', ' — lo sa solo chi lo riceve: gli altri giocatori continuano a vedere PF e condizioni di prima e non trovano niente nel registro.')));
+const conSegreto = (az) => (M.segreto ? { ...az, segreto: true } : az);
+const testoInviato = (b) => `${M.segreto ? 'Inviato in segreto' : 'Inviato'} a ${nomiBersagli(b)}`;
 
 function pannelloValore(tipo, b = bersagli()) {
   if (!b.length) return;
@@ -213,11 +219,12 @@ function pannelloValore(tipo, b = bersagli()) {
       const extra = modo === 'meta' ? 'metà danni' : modo === 'dividi' ? `diviso tra ${b.length}` : '';
       const mot = [motivo.value.trim(), extra].filter(Boolean).join(', ');
       let ok = 0;
-      for (const m of b) if (T.inviaAzione(m.id, { tipo, valore: v, motivo: mot, ...(tipo === 'danno' && critico.checked ? { critico: true } : {}) })) ok++;
-      if (ok) { chiudi(); vibra(20); avviso(`Inviato a ${nomiBersagli(b)}`); }
+      for (const m of b) if (T.inviaAzione(m.id, conSegreto({ tipo, valore: v, motivo: mot, ...(tipo === 'danno' && critico.checked ? { critico: true } : {}) }))) ok++;
+      if (ok) { chiudi(); vibra(20); avviso(testoInviato(b)); }
     };
     c.append(numero, motivo,
       tipo === 'danno' ? h('label.check', critico, ' Colpo critico (a 0 PF: 2 fallimenti)') : null,
+      opzioneSegreto(),
       tipo === 'danno'
         ? h('div.riga-btn', h('button.btn.grande.pericolo', { onclick: () => manda() }, '⚔ Infliggi'), h('button.btn.grande', { onclick: () => manda('meta') }, '½ Metà (TS superato)'))
         : tipo === 'pe' && b.length > 1
@@ -231,16 +238,16 @@ function pannelloValore(tipo, b = bersagli()) {
 function pannelloCondizioni(b = bersagli()) {
   if (!b.length) return;
   pannello(`Condizioni · ${nomiBersagli(b)}`, (c, chiudi) => {
-    c.append(h('p.nota', 'Tocca una condizione per metterla a tutti i selezionati; se ce l\'hanno già tutti, la toglie.'),
+    c.append(h('p.nota', 'Tocca una condizione per metterla a tutti i selezionati; se ce l\'hanno già tutti, la toglie.'), opzioneSegreto(),
       h('div.chips', R.CONDIZIONI.map((cd) => {
         const tutti = b.every((m) => m.condizioni.includes(cd.id));
         const alcuni = b.some((m) => m.condizioni.includes(cd.id));
         return h('button.chip' + (tutti ? '.attivo' : alcuni ? '.consigliato' : ''), { onclick: () => {
           for (const m of b) {
             const ha = m.condizioni.includes(cd.id);
-            if (tutti ? ha : !ha) T.inviaAzione(m.id, { tipo: 'condizione', id: cd.id, attiva: !tutti });
+            if (tutti ? ha : !ha) T.inviaAzione(m.id, conSegreto({ tipo: 'condizione', id: cd.id, attiva: !tutti }));
           }
-          chiudi(); avviso(`${cd.nome}: ${tutti ? 'tolta' : 'messa'} a ${nomiBersagli(b)}`);
+          chiudi(); avviso(`${cd.nome}: ${tutti ? 'tolta' : 'messa'}${M.segreto ? ' in segreto' : ''} a ${nomiBersagli(b)}`);
         } }, cd.nome);
       })));
   });
@@ -259,9 +266,10 @@ function pannelloOggetto(b = bersagli()) {
         if (!nome.value.trim()) return avviso('Scrivi il nome dell\'oggetto', 'errore');
         const oggetto = { nome: nome.value.trim(), qta: Math.max(1, Number(qta.value) || 1), peso: Math.max(0, Number(peso.value) || 0), descrizione: descr.value.trim() };
         let ok = 0;
-        for (const m of b) if (T.inviaAzione(m.id, { tipo: 'oggetto', oggetto })) ok++;
-        if (ok) { chiudi(); avviso(`${oggetto.nome} dato a ${nomiBersagli(b)}`); }
+        for (const m of b) if (T.inviaAzione(m.id, conSegreto({ tipo: 'oggetto', oggetto }))) ok++;
+        if (ok) { chiudi(); avviso(`${oggetto.nome} dato${M.segreto ? ' in segreto' : ''} a ${nomiBersagli(b)}`); }
       } }, '⚱ Metti nello zaino'),
+      opzioneSegreto(),
       avvisaAssenti(b));
     setTimeout(() => nome.focus(), 250);
   }, { classe: 'stretto' });
@@ -277,9 +285,10 @@ function pannelloMonete(b = bersagli()) {
         const monete = Object.fromEntries(R.MONETE.map((m) => [m.id, Math.max(0, Number(campi[m.id].value) || 0)]));
         if (!Object.values(monete).some(Boolean)) return avviso('Scrivi quante monete', 'errore');
         let ok = 0;
-        for (const m of b) if (T.inviaAzione(m.id, { tipo: 'monete', monete })) ok++;
-        if (ok) { chiudi(); avviso(`${T.testoMonete(monete)} a ${nomiBersagli(b)}`); }
+        for (const m of b) if (T.inviaAzione(m.id, conSegreto({ tipo: 'monete', monete }))) ok++;
+        if (ok) { chiudi(); avviso(`${T.testoMonete(monete)}${M.segreto ? ' in segreto' : ''} a ${nomiBersagli(b)}`); }
       } }, '◎ Dai le monete'),
+      opzioneSegreto(),
       avvisaAssenti(b));
   }, { classe: 'stretto' });
 }
@@ -289,7 +298,7 @@ function pannelloAltro() {
   const ids = b.map((m) => m.id);
   pannello(`Per ${nomiBersagli(b)}`, (c, chiudi) => {
     const voce = (icona, testo, nota, fn) => h('button.voce-azione', { onclick: () => { chiudi(); fn(); } }, h('span.voce-azione-ico', icona), h('span', h('strong', testo), h('small', nota)));
-    c.append(h('div.lista-azioni',
+    c.append(opzioneSegreto(), h('div.lista-azioni',
       voce('✉', 'Messaggio privato', 'Lo leggono solo loro', async () => {
         const t = await chiediTesto(`Messaggio a ${nomiBersagli(b)}`, '', { etichetta: 'Solo i giocatori selezionati lo vedranno', multiriga: true });
         if (!t?.trim()) return;
@@ -298,8 +307,8 @@ function pannelloAltro() {
       }),
       voce('✦', 'Punti esperienza', 'A ciascuno o da dividere', () => pannelloValore('pe', b)),
       voce('☆', 'Ispirazione eroica', 'Si accende sulla loro scheda', () => {
-        let ok = 0; for (const id of ids) if (T.inviaAzione(id, { tipo: 'ispirazione' })) ok++;
-        if (ok) avviso(`Ispirazione a ${nomiBersagli(b)}`);
+        let ok = 0; for (const id of ids) if (T.inviaAzione(id, conSegreto({ tipo: 'ispirazione' }))) ok++;
+        if (ok) avviso(`Ispirazione${M.segreto ? ' in segreto' : ''} a ${nomiBersagli(b)}`);
       }),
       voce('⚱', 'Dai un oggetto', 'Finisce nel loro zaino', () => pannelloOggetto(b)),
       voce('◎', 'Dai monete', 'Oro, argento, rame…', () => pannelloMonete(b)),
@@ -308,6 +317,12 @@ function pannelloAltro() {
       voce('☀', 'Concedi un riposo lungo', 'PF, slot e risorse tornano al massimo', () => { if (T.concediRiposo(ids, 'lungo')) avviso('Riposo lungo concesso'); else avviso('Serve il collegamento al tavolo', 'errore'); }),
       voce('⟳', 'Aggiorna le loro schede', 'Se una scheda sembra vecchia', () => { if (T.chiediSchede(ids)) avviso('Richiesta inviata'); else avviso('Serve il collegamento al tavolo', 'errore'); })));
   }, { classe: 'stretto' });
+}
+
+// Il Master rende pubblico ciò che aveva fatto in segreto a un giocatore
+async function svela(m) {
+  if (!(await conferma(`Svelare a tutti cosa è successo a ${m.nome}? I compagni vedranno PF e condizioni veri e il registro lo annoterà.`, { si: 'Svela' }))) return;
+  if (T.inviaAzione(m.id, { tipo: 'svela' })) avviso(`Svelato: ${m.nome}`);
 }
 
 // ───────── Tiri richiesti ai giocatori ─────────
@@ -409,6 +424,7 @@ function contenutoScheda(id) {
       box('Perc. passiva', prova(() => R.percezionePassiva(pg))),
       box('Dadi vita', prova(() => R.dadiVitaTotali(pg).testo)),
       box('Ispirazione', pg.ispirazione ? '✦' : '–')),
+    pg.segreti ? h('div.comp-segreto', h('small', '🕶 Segreto: ' + (T.testoSegreti(pg) || 'qualcosa di nascosto')), h('button.btn-link', { onclick: () => svela(m || { id, nome: pg.nome }) }, 'Svela a tutti')) : null,
     (pg.condizioni?.length || pg.sfinimento || pg.pf.att <= 0) ? h('div.sl-avvisi',
       (pg.condizioni || []).map((cd) => h('span.comp-chip', T.nomeCondizione(cd))),
       pg.sfinimento ? h('span.comp-chip', `Sfinimento ${pg.sfinimento}`) : null,
@@ -639,13 +655,16 @@ function vistaGruppo(tv) {
     h('div.riga-sel',
       h('span.nota', M.selezionati.size ? `${M.selezionati.size} selezionati: scegli un'azione in basso` : 'Tocca i giocatori per selezionarli'),
       h('button.btn-link', { onclick: () => { if (tutti) M.selezionati.clear(); else giocatori.forEach((m) => M.selezionati.add(m.id)); T.ridisegna(); } }, tutti ? 'Nessuno' : 'Tutti')),
-    h('div.compagni', giocatori.map((m) => {
+    h('div.compagni', giocatori.map((m0) => {
+      const m = T.membroReale(m0);
       const msg = T.nonLetti((v) => v.da === m.id);
       return T.schedaCompagno(m, {
         presente: T.presente(m.id),
         classe: M.selezionati.has(m.id) ? 'selezionato' : '',
         onclick: () => { M.selezionati.has(m.id) ? M.selezionati.delete(m.id) : M.selezionati.add(m.id); vibra(5); T.ridisegna(); },
         extra: h('div',
+          m.segreti ? h('div.comp-segreto', h('small', `🕶 Segreto: ${m.segreti}`),
+            h('button.btn-link', { onclick: ferma(() => svela(m)) }, 'Svela a tutti')) : null,
           m.app !== T.versioneApp() && (!m.app || T.versionePiuVecchia(m.app, T.versioneApp())) ? h('small.comp-avviso', `⚠ App ${m.app ? 'versione ' + m.app : 'vecchia'}: va aggiornata (tu hai la ${T.versioneApp()}). Sul suo telefono: riaprire l'app e toccare «Aggiorna».`) : null,
           h('small.comp-extra', `Percezione passiva ${m.percezione ?? '–'} · Iniziativa ${m.iniziativa != null ? R.segno(m.iniziativa) : '–'} · ${typeof m.velocita === 'number' ? String(m.velocita).replace('.', ',') + ' m' : '–'}`),
           h('div.comp-azioni',
@@ -681,7 +700,7 @@ function vistaIniziativa(tv) {
       h('small', 'I mostri con 🙈 restano nascosti: non compaiono e il loro turno appare come "???".')),
     M.ini.round > 0 ? h('div.turno-banner.grande', h('strong', `Round ${M.ini.round}`), att ? ` · turno di ${att.nome}` : null) : null,
     lista.length ? h('div.ini-lista', lista.map((v, i) => {
-      const pg = v.tipo === 'pg' ? tv.membri[v.pgId] : null;
+      const pg = v.tipo === 'pg' ? T.membroReale(tv.membri[v.pgId]) : null;
       const pf = pg ? `${pg.pf.att}/${pg.pf.max}` : `${v.pf}/${v.pfMax}`;
       const ko = pg ? pg.pf.att <= 0 : v.pf <= 0;
       return h('div.ini-riga' + (i === M.ini.indice && M.ini.round ? '.attuale' : '') + (v.tipo === 'mostro' ? '.mostro' : '') + (ko ? '.ko' : '') + (v.nascosto ? '.nascosto' : ''),

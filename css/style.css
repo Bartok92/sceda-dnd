@@ -1099,6 +1099,15 @@ button.stat-box:active { transform: scale(.96); }
 .voce-condizione .voce-testo { color: #7c1d14; }
 .voce-arrivo .voce-testo, .voce-nome .voce-testo { font-style: italic; color: var(--testo-2); }
 .voce-livello .voce-testo { color: var(--accento); font-weight: 700; }
+/* Segreti del Master: righe del registro, casella nei pannelli, etichette sulle schede */
+.voce.voce-segreta { background: rgba(60, 40, 90, .08); border-radius: 6px; padding-left: 4px; }
+.voce.voce-segreta .voce-testo { font-style: italic; }
+.opzione-segreto { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--chip-bordo); background: rgba(60, 40, 90, .07); }
+.opzione-segreto input { margin-top: 3px; flex: none; width: 20px; height: 20px; }
+.opzione-segreto small { color: var(--testo-2); font-size: .82rem; }
+.comp-segreto { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; padding: 4px 8px; border-radius: 8px; background: rgba(60, 40, 90, .12); }
+.comp-segreto small { color: var(--testo); font-size: .8rem; font-weight: 600; }
+.segreto-giocatore { padding: 8px 10px; border-radius: 10px; background: rgba(60, 40, 90, .1); }
 
 .tavolo-noto { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--linea-forte); background: var(--riquadro-bg); }
 .tavolo-noto-info { flex: 1; min-width: 0; }

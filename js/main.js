@@ -14,7 +14,7 @@ import * as T from './tavolo.js';
 import * as E from './effetti.js';
 import { mostraMaster } from './master.js';
 
-export const VERSIONE_APP = '1.14.0';
+export const VERSIONE_APP = '1.15.0';
 document.documentElement.dataset.versioneApp = VERSIONE_APP;   // letta dal tavolo di gioco (tavolo.js)
 // Edizione iPhone (pagina iphone/): stessi file dell'app, più css/iphone.css e js/iphone.js
 export const EDIZIONE_IPHONE = document.documentElement.dataset.edizione === 'iphone';
