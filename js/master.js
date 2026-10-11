@@ -198,7 +198,8 @@ function nomiBersagli(b) { return b.length > 2 ? `${b.length} giocatori` : b.map
 function avvisaAssenti(b) { return b.some((m) => !T.presente(m.id)) ? h('p.nota', 'Chi non è collegato lo riceverà appena torna al tavolo.') : null; }
 
 // Azioni segrete: il giocatore le riceve, i compagni non vedono niente (né nel registro né su PF e condizioni)
-const opzioneSegreto = () => h('label.check.opzione-segreto', h('input', { type: 'checkbox', checked: !!M.segreto, onchange: (e) => (M.segreto = e.target.checked) }),
+// Togliendo la spunta, il Master può far sapere a tutti cosa aveva fatto in segreto
+const opzioneSegreto = () => h('label.check.opzione-segreto', h('input', { type: 'checkbox', checked: !!M.segreto, onchange: (e) => { M.segreto = e.target.checked; if (!M.segreto) proponiSvela(); } }),
   h('span', h('strong', '🕶 In segreto'), h('small', ' — lo sa solo chi lo riceve: gli altri giocatori continuano a vedere PF e condizioni di prima e non trovano niente nel registro.')));
 const conSegreto = (az) => (M.segreto ? { ...az, segreto: true } : az);
 const testoInviato = (b) => `${M.segreto ? 'Inviato in segreto' : 'Inviato'} a ${nomiBersagli(b)}`;
@@ -319,10 +320,66 @@ function pannelloAltro() {
   }, { classe: 'stretto' });
 }
 
-// Il Master rende pubblico ciò che aveva fatto in segreto a un giocatore
-async function svela(m) {
-  if (!(await conferma(`Svelare a tutti cosa è successo a ${m.nome}? I compagni vedranno PF e condizioni veri e il registro lo annoterà.`, { si: 'Svela' }))) return;
-  if (T.inviaAzione(m.id, { tipo: 'svela' })) avviso(`Svelato: ${m.nome}`);
+// Il Master rende pubblico ciò che aveva fatto in segreto a un giocatore: una cosa alla volta o tutto insieme.
+// I compagni leggono nel registro cosa era successo (es. "25 danni · PF 120 → 95") e vedono PF e condizioni veri.
+const rigaSvela = (m, a) => h('div.svela-riga',
+  h('div.svela-testo', h('small', 'alle ' + oraBreve(a.t)), h('span', a.testo || 'Azione segreta')),
+  h('button.btn.piccolo', { onclick: () => T.svelaAzione(m.id, a.id) }, '🔓 Svela'));
+function svela(m) {
+  pannello(`Svela · ${m.nome}`, (c, chiudi) => c.append(T.vivo(() => {
+    const azioni = T.daSvelare(m.id);
+    const pg = T.schedaDi(m.id)?.pg;
+    if (!azioni.length && !pg?.segreti) return h('p.nota', 'Niente da svelare: ora i compagni vedono tutto.');
+    return h('div.svela',
+      h('p.nota', 'Scegli cosa far sapere a tutti: nel registro comparirà cosa era successo e i compagni vedranno PF e condizioni veri.'),
+      azioni.length ? h('div.svela-lista', azioni.map((a) => rigaSvela(m, a))) : h('p', '🕶 ' + (T.testoSegreti(pg) || 'Qualcosa di nascosto')),
+      azioni.length === 1 ? null : h('button.btn.grande.primario', { onclick: () => { if (T.svelaAzione(m.id)) chiudi(); } }, azioni.length ? '🔓 Svela tutto' : '🔓 Svela a tutti'),
+      T.presente(m.id) ? null : h('p.nota', `${m.nome} non è collegato: lo saprà il tavolo appena torna.`));
+  })), { classe: 'stretto' });
+}
+// Il Master ha appena tolto «In segreto»: propone di svelare quello che aveva fatto di nascosto
+function proponiSvela() {
+  const tv = T.tavoloAttivo(); if (!tv) return;
+  const conSegreti = () => T.elencoCompagni(tv).map((m) => ({ m, azioni: T.daSvelare(m.id) })).filter((x) => x.azioni.length);
+  if (!conSegreti().length) return;
+  pannello('Svelare quello che hai fatto in segreto?', (c, chiudi) => c.append(T.vivo(() => {
+    const lista = conSegreti();
+    if (!lista.length) return h('p.nota', 'Fatto: ora i compagni sanno tutto.');
+    return h('div.svela',
+      h('p.nota', 'Hai tolto «In segreto». Vuoi che anche gli altri giocatori sappiano cosa era successo? Puoi svelare una cosa alla volta o tutto insieme.'),
+      lista.map(({ m, azioni }) => h('div.svela-gruppo', h('h4', m.nome), azioni.map((a) => rigaSvela(m, a)))),
+      h('div.riga-btn',
+        h('button.btn', { onclick: () => chiudi() }, 'Restino segrete'),
+        h('button.btn.primario', { onclick: () => { lista.forEach(({ m }) => T.svelaAzione(m.id)); chiudi(); } }, '🔓 Svela tutto')));
+  })), { classe: 'stretto' });
+}
+
+// Il Master toglie un giocatore dal tavolo: il suo telefono viene scollegato e non rientra finché non viene riammesso
+async function caccia(m) {
+  if (!(await conferma(`Togliere ${m.nome} dal tavolo? Il suo telefono viene scollegato e non può rientrare finché non lo riammetti (in fondo alla scheda «Gruppo»). La sua scheda resta sul suo telefono.`, { si: '⛔ Togli dal tavolo', pericolo: true }))) return;
+  if (!T.caccia(m.id)) return avviso('Operazione non riuscita: riprova', 'errore');
+  M.selezionati.delete(m.id);
+  // Esce anche dall'ordine d'iniziativa
+  if (M.ini?.voci?.some((v) => v.pgId === m.id)) {
+    const ordAtt = ordinate()[M.ini.indice];
+    M.ini.voci = M.ini.voci.filter((v) => v.pgId !== m.id);
+    M.ini.indice = ordAtt ? Math.max(0, ordinate().findIndex((x) => x.id === ordAtt.id)) : 0;
+    salvaIniziativa(); riannuncia();
+  }
+  avviso(`Hai tolto ${m.nome} dal tavolo`);
+  T.ridisegna();
+}
+function vistaEsclusi(tv) {
+  const fuori = T.esclusiDa(tv);
+  if (!fuori.length) return null;
+  const quando = (t) => (new Date(t).toDateString() === new Date().toDateString() ? 'oggi alle ' + oraBreve(t) : 'il ' + new Date(t).toLocaleDateString('it-IT'));
+  return h('div.card.esclusi', h('h3.card-titolo', '⛔ Tolti dal tavolo'),
+    h('p.nota', 'Non possono ricollegarsi. Riammettendoli, potranno tornare toccando «Riapri».'),
+    fuori.map((x) => h('div.esclusi-riga', h('div', h('strong', x.nome || 'Giocatore'), h('small', ' · ' + quando(x.t))),
+      h('button.btn.piccolo', { onclick: async () => {
+        if (!(await conferma(`Riammettere ${x.nome || 'questo giocatore'} al tavolo?`, { si: 'Riammetti' }))) return;
+        if (T.riammetti(x.id)) avviso(`${x.nome || 'Il giocatore'} può tornare al tavolo`);
+      } }, 'Riammetti'))));
 }
 
 // ───────── Tiri richiesti ai giocatori ─────────
@@ -424,7 +481,7 @@ function contenutoScheda(id) {
       box('Perc. passiva', prova(() => R.percezionePassiva(pg))),
       box('Dadi vita', prova(() => R.dadiVitaTotali(pg).testo)),
       box('Ispirazione', pg.ispirazione ? '✦' : '–')),
-    pg.segreti ? h('div.comp-segreto', h('small', '🕶 Segreto: ' + (T.testoSegreti(pg) || 'qualcosa di nascosto')), h('button.btn-link', { onclick: () => svela(m || { id, nome: pg.nome }) }, 'Svela a tutti')) : null,
+    pg.segreti ? h('div.comp-segreto', h('small', '🕶 Segreto: ' + (T.testoSegreti(pg) || 'qualcosa di nascosto')), h('button.btn-link', { onclick: () => svela(m || { id, nome: pg.nome }) }, '🔓 Svela…')) : null,
     (pg.condizioni?.length || pg.sfinimento || pg.pf.att <= 0) ? h('div.sl-avvisi',
       (pg.condizioni || []).map((cd) => h('span.comp-chip', T.nomeCondizione(cd))),
       pg.sfinimento ? h('span.comp-chip', `Sfinimento ${pg.sfinimento}`) : null,
@@ -648,7 +705,7 @@ function vistaChat(tv) {
 function vistaGruppo(tv) {
   const giocatori = T.elencoCompagni(tv);
   for (const id of [...M.selezionati]) if (!tv.membri[id]) M.selezionati.delete(id);
-  if (!giocatori.length) return h('div.card.vuota', h('p', 'Nessun giocatore ancora al tavolo.'), h('p.nota', 'Tocca il codice in alto e fai inquadrare il QR ai giocatori.'));
+  if (!giocatori.length) return h('div', h('div.card.vuota', h('p', 'Nessun giocatore ancora al tavolo.'), h('p.nota', 'Tocca il codice in alto e fai inquadrare il QR ai giocatori.')), vistaEsclusi(tv));
   const tutti = giocatori.every((m) => M.selezionati.has(m.id));
   const recenti = [...M.tiri].slice(-3).reverse();
   return h('div.master-gruppo',
@@ -664,12 +721,13 @@ function vistaGruppo(tv) {
         onclick: () => { M.selezionati.has(m.id) ? M.selezionati.delete(m.id) : M.selezionati.add(m.id); vibra(5); T.ridisegna(); },
         extra: h('div',
           m.segreti ? h('div.comp-segreto', h('small', `🕶 Segreto: ${m.segreti}`),
-            h('button.btn-link', { onclick: ferma(() => svela(m)) }, 'Svela a tutti')) : null,
+            h('button.btn-link', { onclick: ferma(() => svela(m)) }, '🔓 Svela…')) : null,
           m.app !== T.versioneApp() && (!m.app || T.versionePiuVecchia(m.app, T.versioneApp())) ? h('small.comp-avviso', `⚠ App ${m.app ? 'versione ' + m.app : 'vecchia'}: va aggiornata (tu hai la ${T.versioneApp()}). Sul suo telefono: riaprire l'app e toccare «Aggiorna».`) : null,
           h('small.comp-extra', `Percezione passiva ${m.percezione ?? '–'} · Iniziativa ${m.iniziativa != null ? R.segno(m.iniziativa) : '–'} · ${typeof m.velocita === 'number' ? String(m.velocita).replace('.', ',') + ' m' : '–'}`),
           h('div.comp-azioni',
             h('button.btn.piccolo', { onclick: ferma(() => apriScheda(m.id)) }, ico('libro'), T.schedaDi(m.id) ? 'Scheda' : 'Scheda…'),
-            h('button.btn.piccolo', { onclick: ferma(() => { M.chatCon = m.id; M.vista = 'chat'; T.ridisegna(); }) }, '✉ Scrivi', msg ? h('span.badge', msg) : null))),
+            h('button.btn.piccolo', { onclick: ferma(() => { M.chatCon = m.id; M.vista = 'chat'; T.ridisegna(); }) }, '✉ Scrivi', msg ? h('span.badge', msg) : null),
+            h('button.btn.piccolo.togli', { 'aria-label': `Togli ${m.nome} dal tavolo`, onclick: ferma(() => caccia(m)) }, '⛔ Togli'))),
       });
     })),
     recenti.length ? h('div.tiri-recenti', h('h3.card-titolo', 'Ultimi tiri chiesti'),
@@ -679,7 +737,8 @@ function vistaGruppo(tv) {
       const presenti = giocatori.filter((m) => T.presente(m.id)).map((m) => m.id);
       if (!presenti.length) return avviso('Nessun giocatore collegato', 'errore');
       T.chiediSchede(presenti); avviso('Chiesto l\'aggiornamento delle schede');
-    } }, '⟳ Aggiorna le schede di tutti'));
+    } }, '⟳ Aggiorna le schede di tutti'),
+    vistaEsclusi(tv));
 }
 
 function spunta(testo, valore, onCambia) {
