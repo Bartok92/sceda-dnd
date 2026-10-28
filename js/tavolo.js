@@ -40,19 +40,31 @@ const PEZZO_MSG = 4000;
 const BATTITO = 4000;
 const RISPOSTA_MAX = 8000;
 // Tempo per collegarsi al centralino (con reti mobili e ponte TURN può volerci qualche secondo in più)
-const ATTESA_COLLEGAMENTO = 12000;
+const attesaCollegamento = () => (ponte ? 20000 : 12000);
 // Server che aiutano i telefoni a trovarsi (STUN gratuiti: ognuno scopre il proprio indirizzo). Il ponte TURN gratuito
-// di PeerJS che la libreria usava non esiste più (verificato a ottobre 2026): con tutti sulla stessa rete Wi-Fi il
-// collegamento è diretto e non serve. Per reti diverse (es. chi usa i dati del telefono) si può aggiungere un ponte
-// personale (account gratuito, es. Metered o ExpressTURN) da "Stato del collegamento": basta metterlo su un telefono,
-// gli altri lo imparano dal tavolo.
+// di PeerJS che la libreria usava non esiste più, e nemmeno Open Relay e freestun (verificato a ottobre 2026): con tutti
+// sulla stessa rete Wi-Fi il collegamento è diretto e non serve. Chi usa i dati del telefono spesso non riesce a
+// raggiungere direttamente chi è sul Wi-Fi (gli operatori mobili bloccano i collegamenti in entrata): serve un ponte
+// personale (account gratuito, es. ExpressTURN) da "Stato del collegamento". Basta metterlo su un telefono (meglio quello
+// del Master, che fa da centralino): gli altri lo imparano dal tavolo e dal QR, e vale subito per i nuovi collegamenti.
 const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }];
 let ponte = null;   // ponte TURN di questo telefono: { urls, username, credential } (false = nessuno)
 async function caricaPonte() {
   if (ponte === null) ponte = (await db.impostazione('ponteTurn', null)) || false;
   return ponte;
 }
-const indirizziPonte = (urls) => String(urls || '').split(/[\s,;]+/).filter((u) => /^(turns?|stun):/i.test(u));
+// Indirizzi del ponte: accetta anche "relay1.expressturn.com:3478" (senza turn:) e aggiunge da sé la variante TCP,
+// che passa anche dalle reti che bloccano l'UDP
+function indirizziPonte(urls) {
+  const lista = [];
+  for (let u of String(urls || '').split(/[\s,;]+/)) {
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{2,5})?$/i.test(u)) u = 'turn:' + u + (/:\d+$/.test(u) ? '' : ':3478');
+    if (!/^(turns?|stun):/i.test(u)) continue;
+    if (!lista.includes(u)) lista.push(u);
+    if (/^turn:/i.test(u) && !/\?transport=/i.test(u) && !lista.includes(u + '?transport=tcp')) lista.push(u + '?transport=tcp');
+  }
+  return lista;
+}
 function serverIce(conPonte = ponte) {
   const lista = [...STUN];
   const urls = indirizziPonte(conPonte?.urls);
@@ -62,10 +74,40 @@ function serverIce(conPonte = ponte) {
 const opzioniPeer = () => ({ debug: 0, config: { iceServers: serverIce(), sdpSemantics: 'unified-plan' } });
 async function salvaPonte(nuovo) {
   ponte = nuovo?.urls ? { urls: String(nuovo.urls), username: String(nuovo.username || ''), credential: String(nuovo.credential || '') } : false;
+  applicaPonteAlVolo();
   await db.salvaImpostazione('ponteTurn', ponte || null);
 }
-// Un ponte arrivato dal tavolo si tiene solo se questo telefono non ne ha già uno suo
-function imparaPonte(p) { if (p?.urls && !ponte && indirizziPonte(p.urls).length) salvaPonte(p).catch(console.error); }
+// La libreria legge le impostazioni a ogni nuovo collegamento: il ponte vale subito, senza far ricollegare nessuno
+function applicaPonteAlVolo() {
+  const p = S.peer;
+  if (p && !p.destroyed && p.options) p.options.config = { ...(p.options.config || {}), iceServers: serverIce() };
+}
+// Un ponte arrivato dal tavolo (o dal QR) si tiene solo se questo telefono non ne ha già uno suo
+async function imparaPonte(p) {
+  if (!p?.urls || !indirizziPonte(p.urls).length) return;
+  await caricaPonte();
+  if (!ponte) await salvaPonte(p).catch(console.error);
+}
+// Dati del ponte incollati così come li dà il sito (testo con "username: …", oppure l'elenco iceServers in JSON)
+export function leggiPonteDaTesto(testo) {
+  const t = String(testo || '');
+  try {
+    const j = JSON.parse(t);
+    const elenco = (Array.isArray(j) ? j : j.iceServers || [j]).filter((s) => s && [].concat(s.urls || s.url || []).some((u) => /^turns?:/i.test(u)));
+    if (elenco.length) return { urls: elenco.flatMap((s) => [].concat(s.urls || s.url)).filter((u) => /^turns?:/i.test(u)).join(' '), username: String(elenco[0].username || ''), credential: String(elenco[0].credential || '') };
+  } catch {}
+  // "turn_username 123" anche senza i due punti; le etichette generiche ("username") solo con i due punti o l'uguale
+  const valore = (...re) => { for (const r of re) { const v = t.match(r)?.[1]; if (v) return v.replace(/^["']|["']$/g, ''); } return ''; };
+  const username = valore(/turn_?user(?:name)?["']?\s*[:=]?\s*["']?([^\s"',;:=]+)/i, /(?:user(?:name)?|utente|nome utente)["']?\s*[:=]\s*["']?([^\s"',;]+)/i);
+  const credential = valore(/turn_?pass(?:word)?["']?\s*[:=]?\s*["']?([^\s"',;:=]+)/i, /(?:password|credential|pass)["']?\s*[:=]\s*["']?([^\s"',;]+)/i);
+  let urls = [...t.matchAll(/(?:turns?):[^\s"',;]+/gi)].map((m) => m[0]);
+  if (!urls.length) {
+    const host = t.match(/(?:server|url|host|indirizzo)["']?\s*[:=]\s*["']?([a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{2,5})?)/i)?.[1]
+      || t.match(/\b((?:relay|turn)[a-z0-9-]*(?:\.[a-z0-9-]+)+(?::\d{2,5})?)/i)?.[1];
+    if (host) urls = [host];
+  }
+  return urls.length || username || credential ? { urls: urls.join(' '), username, credential } : null;
+}
 // Errori di un singolo messaggio: non significano che la linea è caduta
 const ERRORI_DI_MESSAGGIO = ['message-too-big', 'not-open-yet'];
 
@@ -240,6 +282,7 @@ const S = {
   cambio: null,                                // passaggio del centralino al Master: { nuovo, t }
   rinunciaCentralino: 0,                       // il Master non è riuscito a diventare centralino: non ci riprova per un po'
   avvisatiVecchi: new Set(),                   // telefoni con l'app da aggiornare già segnalati
+  nonEntrano: new Map(),                       // chi prova a entrare ma il collegamento non si apre: id → { nome, n, t, ponte }
 };
 export const tavoloAttivo = () => (S.fase === 'spento' ? null : tavoloDa(S.codice));
 export const faseTavolo = () => S.fase;
@@ -372,8 +415,15 @@ function contaFallimento() {
   S.falliti++;
   if (S.falliti >= 3 && !S.aiutoMostrato) {
     S.aiutoMostrato = true;
-    avviso('Non riesco ancora a raggiungere il tavolo, continuo a provare. Tenete aperta l\'app sul telefono che fa da centralino (di solito il Master) e, se potete, collegatevi tutti alla stessa rete Wi-Fi.', 'errore');
+    avviso(testoAiutoCollegamento(), 'errore');
   }
+  aggiornaViste();
+}
+// Su Android il browser dice se si stanno usando i dati del telefono
+const usaDatiMobili = () => navigator.connection?.type === 'cellular';
+function testoAiutoCollegamento() {
+  if (ponte) return 'Non riesco ancora a raggiungere il tavolo, continuo a provare. Il ponte è attivo: controlla di avere internet e che l\'app sia aperta sul telefono del Master.';
+  return `Non riesco ancora a raggiungere il tavolo, continuo a provare. ${usaDatiMobili() ? 'Stai usando i dati del telefono: ' : 'Se stai usando i dati del telefono, '}collegati al Wi-Fi degli altri, oppure chiedi al Master di attivare il «ponte» (in «Stato del collegamento»). Se inquadri di nuovo il QR del Master, il ponte arriva anche a te.`;
 }
 
 async function tentaOspite({ poiHost }) {
@@ -403,8 +453,10 @@ async function tentaOspite({ poiHost }) {
   };
   p.on('open', () => {
     if (gen !== S.generazione) return;
-    const c = p.connect(PREFISSO + S.codice, { reliable: true, serialization: 'json' });
-    const scadenza = setTimeout(() => fallito('lento'), ATTESA_COLLEGAMENTO);
+    // metadata: chi sta provando a entrare (se il collegamento non riesce, il Master lo vede)
+    const c = p.connect(PREFISSO + S.codice, { reliable: true, serialization: 'json',
+      metadata: { id: S.io.id, nome: S.io.master ? 'Il Master' : S.io.nome, ponte: !!ponte } });
+    const scadenza = setTimeout(() => fallito('lento'), attesaCollegamento());
     c.on('open', () => {
       if (gen !== S.generazione) return;
       clearTimeout(scadenza); deciso = true;
@@ -453,6 +505,10 @@ async function tentaHost() {
   });
   p.on('connection', (c) => {
     S.visto.set(c, Date.now());
+    // Qualcuno prova a entrare ma il collegamento non si apre (di solito chi usa i dati del telefono, senza ponte)
+    let aperta = false;
+    c.on('open', () => { aperta = true; });
+    setTimeout(() => { if (gen === S.generazione && !aperta) nonRiesceAEntrare(c.metadata); }, 22000);
     c.on('data', (m) => {
       if (gen !== S.generazione) return;
       S.visto.set(c, Date.now());
@@ -472,6 +528,34 @@ async function tentaHost() {
     else if (ERRORI_DA_RIPROVARE.includes(e.type)) riprovaTra(3000 + Math.random() * 2000, { poiHost: true });
     else console.warn('Tavolo (centralino):', e.type, e);
   });
+}
+
+// Il centralino ha visto un tentativo di entrare finito male: lo segna (e lo dice al Master, se il centralino è un giocatore)
+function nonRiesceAEntrare(chi) {
+  if (!chi || typeof chi !== 'object' || !chi.id) return;
+  const tv = tavoloDa(S.codice);
+  if (!tv || S.presenti.has(chi.id) || escluso(tv, chi.id)) return;
+  const info = { id: String(chi.id), nome: String(chi.nome || 'Qualcuno').slice(0, 40), ponte: !!chi.ponte };
+  segnaNonEntra(info);
+  if (!S.io.master && tv.master?.id && S.presenti.has(tv.master.id)) mandaA(tv.master.id, { tipo: 'nonEntra', chi: info });
+}
+function segnaNonEntra(info) {
+  const prima = S.nonEntrano.get(info.id);
+  S.nonEntrano.set(info.id, { ...info, n: (prima?.n || 0) + 1, t: Date.now() });
+  if (!prima || Date.now() - prima.t > 120e3) avviso(`${info.nome} prova a entrare al tavolo ma il collegamento non riesce. ${ponte ? 'Il ponte è attivo: controllate che abbia internet.' : 'Di solito succede con i dati del telefono: collegatelo al vostro Wi-Fi o attivate il «ponte».'}`, 'errore');
+  aggiornaViste();
+}
+// Avviso nel riquadro del tavolo: chi non riesce a entrare negli ultimi 3 minuti
+function avvisoNonEntrano() {
+  const lista = [...S.nonEntrano.values()].filter((x) => !S.presenti.has(x.id) && Date.now() - x.t < 180e3);
+  if (!lista.length) return null;
+  const nomi = lista.map((x) => x.nome).join(', ');
+  return h('div.avviso-collegamento',
+    h('strong', `⚠ ${nomi} ${lista.length === 1 ? 'prova' : 'provano'} a entrare ma il collegamento non riesce.`),
+    h('small', ponte
+      ? 'Il ponte è attivo su questo telefono: controllate che abbiano internet e l\'app aggiornata.'
+      : 'Succede quasi sempre a chi usa i dati del telefono: collegatelo al vostro Wi-Fi, oppure attiva il «ponte» (una volta sola, poi vale per tutte le serate).'),
+    h('button.btn-link', { onclick: apriCollegamento }, '📶 Stato del collegamento e ponte'));
 }
 
 // Fotografia del collegamento (per il pannello "Stato del collegamento" e per le prove)
@@ -602,6 +686,7 @@ function riceviHost(c, m) {
     for (const [vecchia, x] of [...S.conns]) if (x === id && vecchia !== c) { S.conns.delete(vecchia); S.visto.delete(vecchia); S.sonde.delete(vecchia); S.battonoTutti.delete(vecchia); try { vecchia.close(); } catch {} }
     S.conns.set(c, id);
     S.presenti.add(id);
+    S.nonEntrano.delete(id);
     if (m.protocollo >= PROTOCOLLO) S.battonoTutti.add(c);
     else avvisaAppVecchia(id, m.io.master ? 'Il Master' : m.pg?.nome || m.io.nome);
     // Azioni in coda che teneva un vecchio centralino: passano a me, che le consegno
@@ -630,6 +715,11 @@ function riceviHost(c, m) {
     if (escluso(tv, m.pg.id)) return;
     tv.membri[m.pg.id] = m.pg;
     aTutti({ tipo: 'stato', pg: m.pg }, c);
+  } else if (m.tipo === 'ponte') {
+    // Qualcuno ha appena attivato il ponte: lo imparo (se non ne ho uno) e lo giro a tutti
+    imparaPonte(m.ponte);
+    aTutti({ tipo: 'ponte', ponte: m.ponte }, c);
+    return;
   } else if (m.tipo === 'esclusi') {
     // Solo il Master decide chi esce dal tavolo
     if (!tv.master?.id || S.conns.get(c) !== tv.master.id) return;
@@ -657,6 +747,7 @@ function riceviOspite(m) {
   if (m.tipo === 'battito') { S.hostBatte = true; if (m.sonda) inviaA(S.conn, { tipo: 'battito' }); return; }
   if (m.tipo === 'cambioCentralino') { S.cambio = { nuovo: m.nuovo, t: Date.now() }; return; }
   if (m.tipo === 'espulso') { espulso(tv); return; }
+  if (m.tipo === 'ponte') { imparaPonte(m.ponte); return; }
   if (m.tipo === 'esclusi') {
     uniscEsclusi(tv, m.esclusi);
     if (escluso(tv, S.io.id) && !S.io.master) { espulso(tv); return; }
@@ -792,6 +883,7 @@ function perMe(m) {
   else if (m.tipo === 'chiediImg') { if (S.io.master) inviaImmagine(m); }
   else if (m.tipo === 'pezzo') { if (!S.io.master) riceviPezzo(m); }
   else if (m.tipo === 'effettoTerminato') effettoTerminatoDaBersaglio(m);
+  else if (m.tipo === 'nonEntra') { if (S.io.master && m.chi?.id) segnaNonEntra({ id: String(m.chi.id), nome: String(m.chi.nome || 'Qualcuno').slice(0, 40), ponte: !!m.chi.ponte }); }
 }
 
 // Un compagno ha tolto un mio effetto a concentrazione: lo tolgo dall'elenco (se non resta nessuno, la concentrazione finisce)
@@ -1564,13 +1656,27 @@ export function registroPerSerata(tv, { limite = 80 } = {}) {
   }));
 }
 
+// Testo del QR: il codice del tavolo e, se questo telefono ce l'ha, il ponte (così chi usa i dati riesce a entrare)
+function testoQR(codice) {
+  const base = `SCHEDA-DND TAVOLO ${codice}`;
+  if (!ponte?.urls) return base;
+  const json = JSON.stringify([ponte.urls, ponte.username, ponte.credential]);
+  return `${base} P ${btoa(String.fromCharCode(...new TextEncoder().encode(json)))}`;
+}
+async function ponteDaQR(testo) {
+  const b = String(testo || '').match(/\sP\s+([A-Za-z0-9+/=]+)/)?.[1];
+  if (!b) return null;
+  const [urls, username, credential] = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b), (x) => x.charCodeAt(0))));
+  return { urls, username, credential };
+}
 export function mostraQR(codice) {
   pannello('Codice del tavolo', (c) => {
     const qr = h('div.qr');
     c.append(h('div.qr-ctr', qr), h('p.codice-grande', codice),
-      h('p.nota.centrato', 'I giocatori aprono la loro scheda, toccano il tavolo in alto e scelgono "Unisciti a un tavolo": possono inquadrare questo QR o scrivere il codice.'));
+      h('p.nota.centrato', 'I giocatori aprono la loro scheda, toccano il tavolo in alto e scelgono "Unisciti a un tavolo": possono inquadrare questo QR o scrivere il codice.'),
+      ponte ? h('p.nota.centrato', 'Il QR contiene anche il ponte: chi lo inquadra riesce a entrare anche con i dati del telefono.') : null);
     rete().then(({ qrcode }) => {
-      const q = qrcode(0, 'M'); q.addData(`SCHEDA-DND TAVOLO ${codice}`); q.make();
+      const q = qrcode(0, 'M'); q.addData(testoQR(codice)); q.make();
       qr.innerHTML = q.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
     });
   }, { classe: 'stretto' });
@@ -1588,12 +1694,14 @@ export async function apriTavolo({ master = false } = {}) {
   pannello('Tavolo di gioco', (c) => { c.append(vivo(() => contenutoTavolo({ master }))); }, { pieno: true });
 }
 
+// Testata del tavolo (più l'avviso di chi non riesce a entrare, se c'è): restituisce un elenco di elementi
 export function testaTavolo(tv) {
-  return h('div.tavolo-testa',
+  return [h('div.tavolo-testa',
     h('div.tavolo-titoli', h('h3.tavolo-nome', tv.nome),
       h('p.tavolo-fase', { 'data-fase': S.fase }, S.fase === 'collegato' ? testoPresenze(tv) : TESTO_FASE[S.fase]),
       h('button.btn-link', { onclick: apriCollegamento }, '📶 Stato del collegamento')),
-    h('button.codice-btn', { onclick: () => mostraQR(tv.codice) }, h('small', 'Codice'), h('strong', tv.codice), h('small', 'mostra QR')));
+    h('button.codice-btn', { onclick: () => mostraQR(tv.codice) }, h('small', 'Codice'), h('strong', tv.codice), h('small', 'mostra QR'))),
+  avvisoNonEntrano()];
 }
 
 // ───── Stato del collegamento e ponte TURN ─────
@@ -1613,31 +1721,51 @@ export async function apriCollegamento() {
         h('p.nota', 'Non c\'è un numero massimo di partecipanti. Lo schermo resta acceso finché sei al tavolo. Se arriva il Master e il centralino è il telefono di un giocatore, il ruolo passa da solo al Master (in pochi secondi tutti si ricollegano).'));
     }));
     // Ponte TURN
-    const campoUrl = h('textarea.campo', { rows: 2, placeholder: 'es. turn:global.relay.metered.ca:80 turn:global.relay.metered.ca:443?transport=tcp' });
+    const campoUrl = h('textarea.campo', { rows: 2, placeholder: 'es. relay1.expressturn.com:3478' });
     const campoUtente = h('input.campo', { placeholder: 'Nome utente', autocomplete: 'off' });
-    const campoPw = h('input.campo', { placeholder: 'Password (credential)', autocomplete: 'off' });
+    const campoPw = h('input.campo', { placeholder: 'Password', autocomplete: 'off' });
     campoUrl.value = ponte?.urls || ''; campoUtente.value = ponte?.username || ''; campoPw.value = ponte?.credential || '';
     const esito = h('p.nota');
+    // Si può incollare tutto insieme, così come lo dà il sito: i campi si compilano da soli
+    const campoIncolla = h('textarea.campo', { rows: 3, placeholder: 'Incolla qui quello che hai copiato dal sito (indirizzo, nome utente e password): sistemo io i campi qui sotto.',
+      oninput: () => {
+        const p = leggiPonteDaTesto(campoIncolla.value);
+        if (!p) return;
+        if (p.urls) campoUrl.value = p.urls;
+        if (p.username) campoUtente.value = p.username;
+        if (p.credential) campoPw.value = p.credential;
+        esito.textContent = `Ho compilato ${[p.urls && 'indirizzo', p.username && 'nome utente', p.credential && 'password'].filter(Boolean).join(', ')}: controlla e tocca «Prova».`;
+      } });
     const leggi = () => ({ urls: campoUrl.value.trim(), username: campoUtente.value.trim(), credential: campoPw.value.trim() });
     c.append(
-      h('h3.card-titolo', 'Ponte per reti diverse (facoltativo)'),
-      h('p.nota', 'Se siete tutti sulla stessa rete Wi-Fi non serve. Serve se qualcuno usa i dati del telefono o se il Wi-Fi non lascia parlare i telefoni tra loro. Si crea un account gratuito per un "server TURN" (es. Metered o ExpressTURN) e si copiano qui indirizzo, utente e password. Basta farlo sul telefono del Master: gli altri lo ricevono dal tavolo.'),
-      campo('Indirizzi del ponte', campoUrl), campo('Utente', campoUtente), campo('Password', campoPw),
+      h('h3.card-titolo', 'Ponte per chi usa i dati del telefono'),
+      ponte ? h('p.ponte-attivo', '✓ Il ponte è attivo su questo dispositivo.') : null,
+      h('p.nota', 'Con tutti sullo stesso Wi-Fi non serve. Chi usa i dati del telefono (4G/5G) spesso non riesce a raggiungere direttamente chi è sul Wi-Fi e resta su «Collegamento…»: il ponte fa da ripetitore su internet e risolve. I messaggi restano cifrati: il ponte li passa senza poterli leggere.'),
+      h('details.ponte-guida', { open: !ponte }, h('summary', 'Come si attiva (5 minuti, gratis, una volta sola)'),
+        h('ol',
+          h('li', 'Apri il sito expressturn.com e crea un account gratuito (bastano email e password).'),
+          h('li', 'Nella tua pagina personale trovi l\'indirizzo del server (tipo relay1.expressturn.com:3478), il nome utente e la password del TURN.'),
+          h('li', 'Copiali e incollali qui sotto (anche tutto insieme nel primo riquadro), poi tocca «Prova» e «Salva».'),
+          h('li', 'Basta farlo sul dispositivo del Master: gli altri lo ricevono dal tavolo e dal QR. Il piano gratuito basta e avanza: l\'app manda solo poche parole.'))),
+      campo('Incolla qui (facoltativo)', campoIncolla),
+      campo('Indirizzo del ponte', campoUrl), campo('Nome utente', campoUtente), campo('Password', campoPw),
       esito,
       h('div.riga-btn',
         h('button.btn', { onclick: async () => {
           const cfg = leggi();
-          if (!indirizziPonte(cfg.urls).length) { esito.textContent = 'Scrivi almeno un indirizzo che inizia con turn: (o turns:)'; return; }
+          if (!indirizziPonte(cfg.urls).length) { esito.textContent = 'Scrivi l\'indirizzo del ponte, per esempio relay1.expressturn.com:3478'; return; }
           esito.textContent = 'Provo il ponte… (qualche secondo)';
           const n = await provaPonte(cfg);
           esito.textContent = n ? `Il ponte funziona ✓ (${n} percorsi trovati). Tocca "Salva".` : 'Il ponte non risponde: controlla indirizzo, utente e password.';
         } }, 'Prova'),
         h('button.btn.primario', { onclick: async () => {
           const cfg = leggi();
-          if (cfg.urls && !indirizziPonte(cfg.urls).length) { esito.textContent = 'Gli indirizzi devono iniziare con turn: (o turns:)'; return; }
+          if (cfg.urls && !indirizziPonte(cfg.urls).length) { esito.textContent = 'Non riconosco l\'indirizzo: scrivilo come relay1.expressturn.com:3478 (oppure turn:…)'; return; }
           await salvaPonte(cfg.urls ? cfg : null);
-          esito.textContent = cfg.urls ? 'Ponte salvato. Vale dal prossimo collegamento.' : 'Ponte tolto.';
-          if (S.fase === 'collegato') riavviaCollegamento();
+          // Vale subito per chi entra; e passa agli altri telefoni del tavolo (così chiunque faccia da centralino ce l'ha)
+          if (cfg.urls && S.fase === 'collegato') invia({ tipo: 'ponte', ponte });
+          esito.textContent = cfg.urls ? 'Ponte salvato e attivo ✓ Vale subito per chi entra e passa agli altri telefoni del tavolo.' : 'Ponte tolto.';
+          aggiornaViste();
         } }, 'Salva')),
       ponte ? h('button.btn-link', { onclick: async () => { await salvaPonte(null); campoUrl.value = campoUtente.value = campoPw.value = ''; esito.textContent = 'Ponte tolto da questo telefono.'; } }, 'Togli il ponte da questo telefono') : null);
   }, { classe: 'stretto' });
@@ -1657,12 +1785,6 @@ async function provaPonte(cfg) {
   } catch (e) { console.warn(e); return 0; } finally { try { pc?.close(); } catch {} }
 }
 
-// Ricollega subito con le impostazioni nuove (es. dopo aver salvato il ponte)
-function riavviaCollegamento() {
-  if (S.chiuso || S.fase === 'spento') return;
-  if (S.ruolo === 'host') { pulisciPeer(); tentaHost(); } else centralinoPerso();
-}
-
 function contenutoTavolo({ master }) {
   const tv = tavoloAttivo();
   if (!tv) return contenutoSenzaTavolo({ master });
@@ -1670,6 +1792,12 @@ function contenutoTavolo({ master }) {
   return h('div.tavolo',
     testaTavolo(tv),
     S.fase !== 'collegato' ? h('p.nota', S.fase === 'collegamento' ? 'Cerco il tavolo… se nessuno lo ha ancora aperto, questo telefono farà da centralino.' : 'Il collegamento si è interrotto: riprovo da solo. Tieni l\'app aperta.') : null,
+    // Dopo qualche tentativo a vuoto: cosa fare (di solito: dati del telefono senza ponte)
+    S.fase !== 'collegato' && S.falliti >= 2 ? h('div.avviso-collegamento',
+      h('small', testoAiutoCollegamento()),
+      h('div.riga-btn',
+        h('button.btn.piccolo', { onclick: () => scansionaQR({ master }) }, '📷 Inquadra il QR'),
+        h('button.btn.piccolo', { onclick: apriCollegamento }, '📶 Ponte'))) : null,
     turno ? h('div.turno-banner', h('strong', `Round ${turno.round}`), ` · turno di ${turno.nome}`, turno.prossimo ? h('small', ` · poi ${turno.prossimo}`) : null) : null,
     !S.io?.master && turno?.ordine?.length ? ordineCombattimento(turno) : null,
     !S.io?.master ? sezioneDalMaster(tv) : null,
@@ -1799,7 +1927,12 @@ async function scansionaQR({ master = false } = {}) {
         const img = ctx.getImageData(0, 0, tela.width, tela.height);
         const r = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
         const m = r?.data?.match(/TAVOLO\s+([A-Z0-9]{6})/);
-        if (m) { vibra(30); pn.chiudi(); uniscitiA(m[1], { master }); return; }
+        if (m) {
+          vibra(30); pn.chiudi(); fermo = true;
+          // Nel QR può esserci anche il ponte del Master: lo imparo prima di collegarmi
+          ponteDaQR(r.data).then((p) => imparaPonte(p)).catch(console.warn).finally(() => uniscitiA(m[1], { master }));
+          return;
+        }
       }
       setTimeout(() => requestAnimationFrame(giro), 120);
     };

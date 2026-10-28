@@ -1122,6 +1122,16 @@ button.stat-box:active { transform: scale(.96); }
 .esclusi-riga { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--linea); }
 .esclusi-riga small { color: var(--testo-3); }
 .tavolo-espulso { display: block; margin-top: 3px; color: var(--pericolo-testo); font-weight: 700; }
+/* Collegamento: chi non riesce a entrare e ponte (1.17) */
+.avviso-collegamento { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 4px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--pericolo-testo); background: rgba(200, 60, 40, .1); }
+.avviso-collegamento strong { color: var(--pericolo-testo); font-size: .92rem; }
+.avviso-collegamento small { color: var(--testo); font-size: .84rem; line-height: 1.35; }
+.avviso-collegamento .btn-link { align-self: flex-start; padding: 4px 0; font-size: .9rem; }
+.avviso-collegamento .riga-btn { margin-top: 4px; }
+.ponte-attivo { margin: 4px 0 8px; padding: 6px 10px; border-radius: 10px; font-weight: 700; color: var(--testo); background: rgba(40, 140, 80, .15); border: 1px solid rgba(40, 140, 80, .5); }
+.ponte-guida { margin: 8px 0 12px; padding: 8px 12px; border-radius: 10px; border: 1px dashed var(--chip-bordo); }
+.ponte-guida summary { cursor: pointer; font-weight: 700; color: var(--accento); }
+.ponte-guida ol { margin: 8px 0 2px; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; font-size: .9rem; }
 
 .tavolo-noto { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--linea-forte); background: var(--riquadro-bg); }
 .tavolo-noto-info { flex: 1; min-width: 0; }
